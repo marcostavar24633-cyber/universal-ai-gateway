@@ -25,23 +25,47 @@ function validateMessages(messages) {
       typeof message.content === 'string' && message.content.length > 0 && message.content.length <= 12000);
 }
 
+async function readJsonLimited(request) {
+  const reader = request.body?.getReader();
+  if (!reader) throw new Error('Missing request body');
+  const chunks = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_BODY_BYTES) {
+      await reader.cancel();
+      const error = new Error('Request too large');
+      error.status = 413;
+      throw error;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  return JSON.parse(new TextDecoder().decode(bytes));
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (request.method === 'GET' && url.pathname === '/health') return json({ ok: true, service: 'universal-ai-gateway' });
     if (request.method !== 'POST' || url.pathname !== '/v1/chat/completions') return json({ error: 'Not found' }, 404);
-
     const projectId = getProject(request.headers.get('Authorization'), env);
     if (!projectId) return json({ error: 'Unauthorized' }, 401);
-    const declaredLength = Number(request.headers.get('Content-Length') || 0);
-    if (declaredLength > MAX_BODY_BYTES) return json({ error: 'Request too large' }, 413);
-
     let body;
-    try { body = await request.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
+    try { body = await readJsonLimited(request); }
+    catch (error) {
+      if (error?.status === 413) return json({ error: 'Request too large' }, 413);
+      return json({ error: 'Invalid JSON' }, 400);
+    }
     if (!validateMessages(body.messages)) return json({ error: 'Invalid messages payload' }, 400);
-
     const provider = typeof body.provider === 'string' ? body.provider : 'cloudflare';
     const routeMode = typeof body.routeMode === 'string' ? body.routeMode : 'auto';
+    if (!['cloudflare', 'openai', 'anthropic'].includes(provider)) return json({ error: 'Unsupported provider' }, 400);
+    if (!['auto', 'primary', 'openrouter'].includes(routeMode)) return json({ error: 'Unsupported route mode' }, 400);
     try {
       const result = await runGatewayChat({ env, messages: body.messages, provider, routeMode });
       return json({ id: crypto.randomUUID(), project: projectId, object: 'chat.completion', ...result });

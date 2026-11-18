@@ -3,6 +3,16 @@ import assert from 'node:assert/strict';
 import worker from '../src/index.js';
 import { runGatewayChat } from '../src/router.js';
 
+const envFor = (ai = { run: async () => ({ response: 'hello' }) }) => ({
+  GATEWAY_PROJECT_KEYS: JSON.stringify({ 'project-a': 'secret-a' }),
+  AI: ai,
+});
+const request = (body, token = 'secret-a') => new Request('https://gateway.test/v1/chat/completions', {
+  method: 'POST',
+  headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+  body: typeof body === 'string' ? body : JSON.stringify(body),
+});
+
 test('health endpoint is public and does not expose configuration', async () => {
   const response = await worker.fetch(new Request('https://gateway.test/health'), {});
   assert.equal(response.status, 200);
@@ -10,24 +20,44 @@ test('health endpoint is public and does not expose configuration', async () => 
 });
 
 test('chat endpoint requires a project token', async () => {
-  const response = await worker.fetch(new Request('https://gateway.test/v1/chat/completions', { method: 'POST', body: JSON.stringify({ messages: [{ role: 'user', content: 'hi' }] }) }), {});
+  const response = await worker.fetch(request({ messages: [{ role: 'user', content: 'hi' }] }, ''), {});
   assert.equal(response.status, 401);
 });
 
 test('unknown project token is rejected', async () => {
-  const env = { GATEWAY_PROJECT_KEYS: JSON.stringify({ 'project-a': 'secret-a' }) };
-  const response = await worker.fetch(new Request('https://gateway.test/v1/chat/completions', { method: 'POST', headers: { Authorization: 'Bearer wrong' }, body: JSON.stringify({ messages: [{ role: 'user', content: 'hi' }] }) }), env);
+  const response = await worker.fetch(request({ messages: [{ role: 'user', content: 'hi' }] }, 'wrong'), envFor());
   assert.equal(response.status, 401);
 });
 
-test('valid project can call Cloudflare AI', async () => {
-  const env = { GATEWAY_PROJECT_KEYS: JSON.stringify({ 'project-a': 'secret-a' }), AI: { run: async () => ({ response: 'hello' }) } };
-  const response = await worker.fetch(new Request('https://gateway.test/v1/chat/completions', { method: 'POST', headers: { Authorization: 'Bearer secret-a', 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: [{ role: 'user', content: 'hi' }] }) }), env);
+test('valid project receives an OpenAI-compatible completion shape', async () => {
+  const response = await worker.fetch(request({ messages: [{ role: 'user', content: 'hi' }] }), envFor());
   assert.equal(response.status, 200);
   const data = await response.json();
   assert.equal(data.project, 'project-a');
   assert.equal(data.text, 'hello');
   assert.equal(data.provider, 'cloudflare');
+  assert.equal(data.object, 'chat.completion');
+  assert.equal(data.choices[0].message.role, 'assistant');
+  assert.equal(data.choices[0].message.content, 'hello');
+  assert.equal(data.choices[0].finish_reason, 'stop');
+  assert.match(data.id, /^chatcmpl-/);
+});
+
+test('null, array, and malformed payloads are rejected without crashing', async () => {
+  for (const body of ['null', '[]', '{broken']) {
+    const response = await worker.fetch(request(body), envFor());
+    assert.equal(response.status, 400);
+  }
+});
+
+test('invalid messages are rejected', async () => {
+  const response = await worker.fetch(request({ messages: [{ role: 'tool', content: 'hi' }] }), envFor());
+  assert.equal(response.status, 400);
+});
+
+test('oversized request body is rejected', async () => {
+  const response = await worker.fetch(request({ messages: [{ role: 'user', content: 'x'.repeat(33000) }] }), envFor());
+  assert.equal(response.status, 413);
 });
 
 test('OpenRouter fallback uses fixed free model only after quota error', async () => {

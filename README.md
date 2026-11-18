@@ -25,6 +25,10 @@ Pass a project-specific token in `Authorization: Bearer <project-token>`.
 
 Set `GATEWAY_PROJECT_KEYS` as a Cloudflare Worker secret containing a JSON object mapping project IDs to long, unique random tokens. Never expose tokens or provider keys in browser code or commit them to Git.
 
+## Request protection
+
+The Worker applies a Cloudflare Rate Limiting binding after project authentication: 30 requests per 60-second window per project key. Cloudflare documents these limits as approximate and location-scoped, not strict global budgets; bursts can exceed the threshold while counters synchronize. This is a basic abuse guard, not a guaranteed daily AI-usage quota. Request bodies are capped at 32 KB and 40 messages.
+
 ## Routing
 
 - `primary`: call only the selected provider.
@@ -49,6 +53,6 @@ After authenticating Wrangler to the intended Cloudflare account and reviewing t
 ```sh
 npm run deploy
 npx wrangler secret put GATEWAY_PROJECT_KEYS
-``
+```
 
 Only configure the OpenRouter key if intentionally enabling the free OpenRouter route. This repository change does not deploy the Worker or create secrets.

@@ -10,3 +10,11 @@ CF_AI_MODEL = "@cf/meta/llama-3.1-8b-instruct"
 
 [ai]
 binding = "AI"
+
+[[ratelimits]]
+name = "GATEWAY_RATE_LIMITER"
+namespace_id = "9026111801"
+
+[ratelimits.simple]
+limit = 30
+period = 60

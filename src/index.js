@@ -55,6 +55,16 @@ export default {
     if (request.method !== 'POST' || url.pathname !== '/v1/chat/completions') return json({ error: 'Not found' }, 404);
     const projectId = getProject(request.headers.get('Authorization'), env);
     if (!projectId) return json({ error: 'Unauthorized' }, 401);
+
+    if (env.GATEWAY_RATE_LIMITER) {
+      try {
+        const { success } = await env.GATEWAY_RATE_LIMITER.limit({ key: projectId });
+        if (!success) return json({ error: 'Project request rate limit exceeded', code: 'PROJECT_RATE_LIMIT' }, 429);
+      } catch {
+        return json({ error: 'Rate limit service unavailable' }, 503);
+      }
+    }
+
     let body;
     try { body = await readJsonLimited(request); }
     catch (error) {

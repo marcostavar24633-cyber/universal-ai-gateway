@@ -1,4 +1,4 @@
-export const DEFAULT_CF_MODEL = '@cf/meta/llama-3.1-8b-instruct';
+export const DEFAULT_CF_MODEL = '@cf/meta/llama-3.1-8b-instruct-fast';
 export const OPENROUTER_FREE_MODEL = 'openrouter/free';
 
 export function isQuotaError(error) {

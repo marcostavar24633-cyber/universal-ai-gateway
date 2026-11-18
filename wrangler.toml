@@ -6,7 +6,15 @@ compatibility_date = "2026-11-18"
 AI_BILLING_MODE = "free"
 AI_DIRECT_PROVIDERS_ENABLED = "false"
 OPENROUTER_ENABLED = "false"
-CF_AI_MODEL = "@cf/meta/llama-3.1-8b-instruct"
+CF_AI_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast"
 
 [ai]
 binding = "AI"
+
+[[ratelimits]]
+name = "GATEWAY_RATE_LIMITER"
+namespace_id = "9026111801"
+
+[ratelimits.simple]
+limit = 30
+period = 60

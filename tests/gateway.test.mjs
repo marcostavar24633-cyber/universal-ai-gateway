@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import worker from '../src/index.js';
 import { runGatewayChat } from '../src/router.js';
 
-const envFor = (ai = { run: async () => ({ response: 'hello' }) }) => ({
+const envFor = (ai = { run: async () => ({ response: 'hello' }) }, limiter = async () => ({ success: true })) => ({
   GATEWAY_PROJECT_KEYS: JSON.stringify({ 'project-a': 'secret-a' }),
+  GATEWAY_RATE_LIMITER: { limit: limiter },
   AI: ai,
 });
 const request = (body, token = 'secret-a') => new Request('https://gateway.test/v1/chat/completions', {
@@ -27,6 +28,21 @@ test('chat endpoint requires a project token', async () => {
 test('unknown project token is rejected', async () => {
   const response = await worker.fetch(request({ messages: [{ role: 'user', content: 'hi' }] }, 'wrong'), envFor());
   assert.equal(response.status, 401);
+});
+
+test('rate limit is keyed by authenticated project and returns 429 when exceeded', async () => {
+  let key;
+  const env = envFor(undefined, async input => { key = input.key; return { success: false }; });
+  const response = await worker.fetch(request({ messages: [{ role: 'user', content: 'hi' }] }), env);
+  assert.equal(response.status, 429);
+  assert.equal(key, 'project-a');
+  assert.equal((await response.json()).code, 'PROJECT_RATE_LIMIT');
+});
+
+test('rate limiter failures fail closed', async () => {
+  const env = envFor(undefined, async () => { throw new Error('binding unavailable'); });
+  const response = await worker.fetch(request({ messages: [{ role: 'user', content: 'hi' }] }), env);
+  assert.equal(response.status, 503);
 });
 
 test('valid project receives an OpenAI-compatible completion shape', async () => {

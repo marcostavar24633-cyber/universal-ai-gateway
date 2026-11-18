@@ -15,7 +15,7 @@ function normalizeTextResponse(result) {
   return JSON.stringify(result ?? {});
 }
 
-export async function runGatewayChat({ env, messages, provider = 'cloudflare', routeMode = 'auto', fetchImpl = fetch }) {
+export async function runGatewayChat({ env, messages, provider = 'cloudflare', routeMode = 'auto', max_tokens, temperature, fetchImpl = fetch }) {
   const primary = ['cloudflare', 'openai', 'anthropic'].includes(provider) ? provider : 'cloudflare';
   if (!['auto', 'primary', 'openrouter'].includes(routeMode)) throw new Error('Unsupported route mode');
 
@@ -24,7 +24,10 @@ export async function runGatewayChat({ env, messages, provider = 'cloudflare', r
   try {
     if (primary === 'cloudflare') {
       if (!env.AI) throw new Error('Cloudflare AI binding is not configured');
-      const result = await env.AI.run(env.CF_AI_MODEL || DEFAULT_CF_MODEL, { messages });
+      const options = { messages };
+      if (Number.isInteger(max_tokens) && max_tokens > 0) options.max_tokens = Math.min(max_tokens, 8192);
+      if (typeof temperature === 'number' && Number.isFinite(temperature)) options.temperature = Math.max(0, Math.min(2, temperature));
+      const result = await env.AI.run(env.CF_AI_MODEL || DEFAULT_CF_MODEL, options);
       return { provider: 'cloudflare', model: env.CF_AI_MODEL || DEFAULT_CF_MODEL, text: normalizeTextResponse(result), fallback: false };
     }
     if (primary === 'openai') return await runOpenAI({ env, messages, fetchImpl });

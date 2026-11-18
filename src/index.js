@@ -79,7 +79,7 @@ export default {
     if (!['cloudflare', 'openai', 'anthropic'].includes(provider)) return json({ error: 'Unsupported provider' }, 400);
     if (!['auto', 'primary', 'openrouter'].includes(routeMode)) return json({ error: 'Unsupported route mode' }, 400);
     try {
-      const result = await runGatewayChat({ env, messages: body.messages, provider, routeMode });
+      const result = await runGatewayChat({ env, messages: body.messages, provider, routeMode, max_tokens: body.max_tokens, temperature: body.temperature });
       const id = `chatcmpl-${crypto.randomUUID()}`;
       const created = Math.floor(Date.now() / 1000);
       return json({

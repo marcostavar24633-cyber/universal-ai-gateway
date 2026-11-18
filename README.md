@@ -1,13 +1,54 @@
 # Universal AI Gateway
 
-A standalone, free-first AI routing gateway for multiple applications.
+Standalone Cloudflare Worker exposing one authenticated chat API for multiple projects.
 
-The implementation is being introduced via pull request. See the project documentation and deployment instructions once the foundation PR is opened.
+## Status
 
-## Safety defaults
+Foundation only; not deployed. OpenRouter and direct OpenAI/Anthropic API providers are disabled by default. No secrets are included in this repository.
 
-- Cloudflare Workers AI is the default provider.
-- OpenRouter Free fallback is disabled until explicitly configured.
-- Direct OpenAI and Anthropic API providers are disabled unless explicitly opted into API billing.
-- Provider keys and project tokens must be stored as Cloudflare Worker secrets, never in source control.
-- No paid route should ever be enabled implicitly.
+## API
+
+- `GET /health`
+- `POST /v1/chat/completions`
+
+Example request body:
+
+```json
+{
+  "provider": "cloudflare",
+  "routeMode": "auto",
+  "messages": [{ "role": "user", "content": "Hello" }]
+}
+```
+
+Pass a project-specific token in `Authorization: Bearer <project-token>`.
+
+Set `GATEWAY_PROJECT_KEYS` as a Cloudflare Worker secret containing a JSON object mapping project IDs to long, unique random tokens. Never expose tokens or provider keys in browser code or commit them to Git.
+
+## Routing
+
+- `primary`: call only the selected provider.
+- `auto`: call the selected provider; only detected quota/rate-limit errors trigger OpenRouter Free fallback.
+- `openrouter`: call only the fixed `openrouter/free` route.
+- Other provider failures do not silently switch routes.
+
+Cloudflare Workers AI is the default. OpenRouter requires both `OPENROUTER_ENABLED=true` and the `OPENROUTER_API_KEY` secret. Direct OpenAI/Anthropic API access requires `AI_BILLING_MODE=api`, `AI_DIRECT_PROVIDERS_ENABLED=true`, and the corresponding server-side secret. Those APIs can incur separate charges and are disabled by default.
+
+## Local validation
+
+```sh
+npm install
+npm test
+npm run dry-run
+```
+
+## Deploy
+
+After authenticating Wrangler to the intended Cloudflare account and reviewing the configuration:
+
+```sh
+npm run deploy
+npx wrangler secret put GATEWAY_PROJECT_KEYS
+``
+
+Only configure the OpenRouter key if intentionally enabling the free OpenRouter route. This repository change does not deploy the Worker or create secrets.

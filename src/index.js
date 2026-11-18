@@ -61,14 +61,29 @@ export default {
       if (error?.status === 413) return json({ error: 'Request too large' }, 413);
       return json({ error: 'Invalid JSON' }, 400);
     }
-    if (!validateMessages(body.messages)) return json({ error: 'Invalid messages payload' }, 400);
+    if (!body || typeof body !== 'object' || Array.isArray(body) || !validateMessages(body.messages)) {
+      return json({ error: 'Invalid messages payload' }, 400);
+    }
     const provider = typeof body.provider === 'string' ? body.provider : 'cloudflare';
     const routeMode = typeof body.routeMode === 'string' ? body.routeMode : 'auto';
     if (!['cloudflare', 'openai', 'anthropic'].includes(provider)) return json({ error: 'Unsupported provider' }, 400);
     if (!['auto', 'primary', 'openrouter'].includes(routeMode)) return json({ error: 'Unsupported route mode' }, 400);
     try {
       const result = await runGatewayChat({ env, messages: body.messages, provider, routeMode });
-      return json({ id: crypto.randomUUID(), project: projectId, object: 'chat.completion', ...result });
+      const id = `chatcmpl-${crypto.randomUUID()}`;
+      const created = Math.floor(Date.now() / 1000);
+      return json({
+        id,
+        object: 'chat.completion',
+        created,
+        model: result.model,
+        choices: [{ index: 0, message: { role: 'assistant', content: result.text }, finish_reason: 'stop' }],
+        project: projectId,
+        provider: result.provider,
+        text: result.text,
+        fallback: result.fallback,
+        ...(result.fallbackReason ? { fallbackReason: result.fallbackReason } : {}),
+      });
     } catch (error) {
       const status = Number(error?.status) === 429 ? 429 : 503;
       return json({ error: status === 429 ? 'Provider quota or rate limit reached' : 'No configured AI route is currently available', code: status === 429 ? 'PROVIDER_LIMIT' : 'PROVIDER_UNAVAILABLE' }, status);

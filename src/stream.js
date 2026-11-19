@@ -61,17 +61,26 @@ export async function* openAIStreamEvents(body) {
   }
 }
 
+// Workers AI reports no stop reason, so a reply that used the whole token
+// budget is treated as truncated.
+export function cloudflareFinishReason(usage, maxTokens) {
+  return usage && usage.completion_tokens >= maxTokens ? 'length' : 'stop';
+}
+
 // Workers AI text generation stream: `data: {"response":"..."}` ... `data: [DONE]`.
-export async function* cloudflareStreamEvents(body) {
+export async function* cloudflareStreamEvents(body, maxTokens) {
+  let usage;
   for await (const data of readSSEData(body)) {
-    if (data === '[DONE]') return;
+    if (data === '[DONE]') break;
     const chunk = parseJSON(data);
     if (!chunk) continue;
+    usage = toOpenAIUsage(chunk.usage) || usage;
     yield {
       text: typeof chunk.response === 'string' && chunk.response.length ? chunk.response : undefined,
       usage: toOpenAIUsage(chunk.usage),
     };
   }
+  yield { finishReason: cloudflareFinishReason(usage, maxTokens) };
 }
 
 // Anthropic Messages API stream events.

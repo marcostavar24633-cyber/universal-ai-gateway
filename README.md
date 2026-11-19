@@ -9,7 +9,10 @@ Deployed to Cloudflare Workers through the manual `Deploy Universal AI Gateway` 
 ## API
 
 - `GET /health`
+- `GET /v1/models` (requires a project token; lists only the routes configured for this Worker)
 - `POST /v1/chat/completions`
+
+The API is compatible with official OpenAI SDKs: point `baseURL` at `https://<worker>/v1` and use the project token as the API key. The `model` field is ignored; routing is controlled by `provider` and `routeMode`.
 
 Example request body:
 
@@ -28,6 +31,12 @@ Pass a project-specific token in `Authorization: Bearer <project-token>`.
 ### Streaming
 
 With `"stream": true` the gateway answers with `text/event-stream` in the OpenAI `chat.completion.chunk` format, ending with `data: [DONE]`. The last chunk carries `finish_reason` and, when the provider reports it, `usage`. Project, provider and fallback details are returned in the `X-Gateway-Project`, `X-Gateway-Provider`, `X-Gateway-Fallback` and `X-Gateway-Fallback-Reason` headers. Quota errors happen before the first byte, so `auto` fallback works the same as without streaming; if the upstream stream breaks midway, the gateway sends an error event with code `STREAM_INTERRUPTED` and then `[DONE]`.
+
+### Errors
+
+Errors use the OpenAI shape `{"error": {"message", "type", "code"}}`. Stable codes include `INVALID_PROJECT_TOKEN`, `PROJECT_RATE_LIMIT`, `INVALID_MESSAGES`, `REQUEST_TOO_LARGE`, `PROVIDER_LIMIT` and `PROVIDER_UNAVAILABLE`.
+
+Workers AI does not report why generation stopped, so the gateway returns `finish_reason: "length"` when the reply used the whole `max_tokens` budget (256 tokens by default on Workers AI).
 
 Set `GATEWAY_PROJECT_KEYS` as a Cloudflare Worker secret containing a JSON object mapping project IDs to long, unique random tokens. Never expose tokens or provider keys in browser code or commit them to Git.
 

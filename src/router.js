@@ -1,5 +1,6 @@
 import {
   anthropicStreamEvents,
+  cloudflareFinishReason,
   cloudflareStreamEvents,
   mapAnthropicFinishReason,
   mapOpenAIFinishReason,
@@ -10,6 +11,8 @@ import {
 export const DEFAULT_CF_MODEL = '@cf/meta/llama-3.1-8b-instruct-fast';
 export const OPENROUTER_FREE_MODEL = 'openrouter/free';
 export const DEFAULT_ANTHROPIC_MODEL = 'claude-haiku-5-5';
+// Workers AI applies this output limit when max_tokens is not sent.
+export const CF_DEFAULT_MAX_TOKENS = 256;
 
 export function isQuotaError(error) {
   const status = Number(error?.status || error?.statusCode || 0);
@@ -69,8 +72,10 @@ async function runCloudflare({ env, messages, generation, stream }) {
   if (!env.AI) throw new Error('Cloudflare AI binding is not configured');
   const model = env.CF_AI_MODEL || DEFAULT_CF_MODEL;
   const result = await env.AI.run(model, { messages, ...generation, ...(stream ? { stream: true } : {}) });
-  if (stream) return { provider: 'cloudflare', model, events: cloudflareStreamEvents(result), fallback: false };
-  return { provider: 'cloudflare', model, text: normalizeTextResponse(result), finishReason: openAIFinishReason(result), usage: toOpenAIUsage(result?.usage), fallback: false };
+  const maxTokens = generation.max_tokens || CF_DEFAULT_MAX_TOKENS;
+  if (stream) return { provider: 'cloudflare', model, events: cloudflareStreamEvents(result, maxTokens), fallback: false };
+  const usage = toOpenAIUsage(result?.usage);
+  return { provider: 'cloudflare', model, text: normalizeTextResponse(result), finishReason: cloudflareFinishReason(usage, maxTokens), usage, fallback: false };
 }
 
 async function runOpenRouter({ env, messages, generation, stream, fetchImpl }) {
@@ -127,4 +132,15 @@ async function runAnthropic({ env, messages, generation, stream, fetchImpl }) {
     usage: toOpenAIUsage({ prompt_tokens: data.usage?.input_tokens, completion_tokens: data.usage?.output_tokens }),
     fallback: false,
   };
+}
+
+// Models a project can reach with the current configuration, in OpenAI list format.
+export function listModels(env) {
+  const directEnabled = env.AI_DIRECT_PROVIDERS_ENABLED === 'true' && env.AI_BILLING_MODE === 'api';
+  const entries = [];
+  if (env.AI) entries.push({ id: env.CF_AI_MODEL || DEFAULT_CF_MODEL, owned_by: 'cloudflare' });
+  if (env.OPENROUTER_ENABLED === 'true' && env.OPENROUTER_API_KEY) entries.push({ id: OPENROUTER_FREE_MODEL, owned_by: 'openrouter' });
+  if (directEnabled && env.OPENAI_API_KEY) entries.push({ id: env.OPENAI_MODEL || 'gpt-4.1-mini', owned_by: 'openai' });
+  if (directEnabled && env.ANTHROPIC_API_KEY) entries.push({ id: env.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL, owned_by: 'anthropic' });
+  return entries.map(entry => ({ ...entry, object: 'model', created: 0 }));
 }

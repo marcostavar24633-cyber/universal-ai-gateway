@@ -37,7 +37,7 @@ test('rate limit is keyed by authenticated project and returns 429 when exceeded
   const response = await worker.fetch(request({ messages: [{ role: 'user', content: 'hi' }] }), env);
   assert.equal(response.status, 429);
   assert.equal(key, 'project-a');
-  assert.equal((await response.json()).code, 'PROJECT_RATE_LIMIT');
+  assert.deepEqual((await response.json()).error, { message: 'Project request rate limit exceeded', type: 'rate_limit_error', code: 'PROJECT_RATE_LIMIT' });
 });
 
 test('rate limiter failures fail closed', async () => {
@@ -246,4 +246,40 @@ test('mid-stream upstream errors end the stream with an error event', async () =
   const payloads = await readSSEPayloads(new Response(toOpenAISSE({ id: 'chatcmpl-test', created: 0, model: 'm', events })));
   assert.equal(JSON.parse(payloads.at(-2)).error.code, 'STREAM_INTERRUPTED');
   assert.equal(payloads.at(-1), '[DONE]');
+});
+
+test('models endpoint requires a token and lists only configured routes', async () => {
+  const listRequest = token => new Request('https://gateway.test/v1/models', { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  assert.equal((await worker.fetch(listRequest(), envFor())).status, 401);
+  const response = await worker.fetch(listRequest('secret-a'), envFor());
+  assert.equal(response.status, 200);
+  const data = await response.json();
+  assert.equal(data.object, 'list');
+  assert.deepEqual(data.data.map(model => model.id), ['@cf/meta/llama-3.1-8b-instruct-fast']);
+  assert.equal(data.data[0].object, 'model');
+});
+
+test('unknown routes return an OpenAI-style 404 error', async () => {
+  const response = await worker.fetch(new Request('https://gateway.test/v1/embeddings', { method: 'POST' }), envFor());
+  assert.equal(response.status, 404);
+  assert.equal((await response.json()).error.code, 'NOT_FOUND');
+});
+
+test('Workers AI replies that exhaust max_tokens report finish_reason length', async () => {
+  const ai = { run: async () => ({ response: 'cut', usage: { prompt_tokens: 5, completion_tokens: 30 } }) };
+  const response = await worker.fetch(request({ max_tokens: 30, messages: [{ role: 'user', content: 'hi' }] }), envFor(ai));
+  assert.equal((await response.json()).choices[0].finish_reason, 'length');
+});
+
+test('Workers AI default token budget is used when max_tokens is omitted', async () => {
+  const ai = { run: async () => ({ response: 'long', usage: { prompt_tokens: 5, completion_tokens: 256 } }) };
+  const response = await worker.fetch(request({ messages: [{ role: 'user', content: 'hi' }] }), envFor(ai));
+  assert.equal((await response.json()).choices[0].finish_reason, 'length');
+});
+
+test('streamed Workers AI replies that exhaust max_tokens end with length', async () => {
+  const ai = { run: async () => sseBody([{ response: 'a' }, { response: '', usage: { prompt_tokens: 1, completion_tokens: 10 } }, '[DONE]']) };
+  const response = await worker.fetch(request({ stream: true, max_tokens: 10, messages: [{ role: 'user', content: 'hi' }] }), envFor(ai));
+  const payloads = await readSSEPayloads(response);
+  assert.equal(JSON.parse(payloads.at(-2)).choices[0].finish_reason, 'length');
 });

@@ -139,3 +139,27 @@ test('token that only shares a prefix with a project key is rejected', async () 
   const response = await worker.fetch(request({ messages: [{ role: 'user', content: 'hi' }] }, 'secret-a-extra'), envFor());
   assert.equal(response.status, 401);
 });
+
+test('completion includes provider usage and finish reason when available', async () => {
+  const ai = { run: async () => ({ response: 'cut', usage: { prompt_tokens: 7, completion_tokens: 3 } }) };
+  const response = await worker.fetch(request({ messages: [{ role: 'user', content: 'hi' }] }), envFor(ai));
+  const data = await response.json();
+  assert.deepEqual(data.usage, { prompt_tokens: 7, completion_tokens: 3, total_tokens: 10 });
+  assert.equal(data.choices[0].finish_reason, 'stop');
+});
+
+test('Anthropic stop reasons and usage map to OpenAI fields', async () => {
+  const env = { AI_BILLING_MODE: 'api', AI_DIRECT_PROVIDERS_ENABLED: 'true', ANTHROPIC_API_KEY: 'test-key' };
+  const result = await runGatewayChat({ env, provider: 'anthropic', routeMode: 'primary', messages: [{ role: 'user', content: 'hi' }],
+    fetchImpl: captureFetch({ content: [{ type: 'text', text: 'partial' }], stop_reason: 'max_tokens', usage: { input_tokens: 5, output_tokens: 9 } }, {}) });
+  assert.equal(result.finishReason, 'length');
+  assert.deepEqual(result.usage, { prompt_tokens: 5, completion_tokens: 9, total_tokens: 14 });
+});
+
+test('OpenRouter length finish reason is preserved', async () => {
+  const env = { OPENROUTER_ENABLED: 'true', OPENROUTER_API_KEY: 'test-key' };
+  const result = await runGatewayChat({ env, routeMode: 'openrouter', messages: [{ role: 'user', content: 'hi' }],
+    fetchImpl: captureFetch({ choices: [{ message: { content: 'x' }, finish_reason: 'length' }] }, {}) });
+  assert.equal(result.finishReason, 'length');
+  assert.equal(result.usage, undefined);
+});

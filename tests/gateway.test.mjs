@@ -410,3 +410,18 @@ test('fallback attempts are returned in the response body', async () => {
     globalThis.fetch = original;
   }
 });
+
+test('individual PROJECT_KEY_* secrets authenticate their own project', async () => {
+  const env = { ...envFor(), PROJECT_KEY_MY_SITE: 'site-token' };
+  const data = await (await worker.fetch(request({ messages: [{ role: 'user', content: 'hi' }] }, 'site-token'), env)).json();
+  assert.equal(data.project, 'my-site');
+  assert.equal((await worker.fetch(request({ messages: [{ role: 'user', content: 'hi' }] }, 'secret-a'), env)).status, 200);
+});
+
+test('an invalid GATEWAY_PROJECT_KEYS secret does not disable individual project secrets', async () => {
+  const env = { ...envFor(), GATEWAY_PROJECT_KEYS: '{broken', PROJECT_KEY_BOT: 'bot-token' };
+  const response = await worker.fetch(request({ messages: [{ role: 'user', content: 'hi' }] }, 'bot-token'), env);
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).project, 'bot');
+  assert.equal((await worker.fetch(request({ messages: [{ role: 'user', content: 'hi' }] }, 'secret-a'), env)).status, 401);
+});

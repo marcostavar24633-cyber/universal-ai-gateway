@@ -1,8 +1,9 @@
 import { listModels, PROVIDERS, ROUTE_MODES, runGatewayChat } from './router.js';
 import { toOpenAISSE } from './stream.js';
 
-const MAX_BODY_BYTES = 32_000;
+const MAX_BODY_BYTES = 128_000;
 const MAX_MESSAGES = 40;
+const MAX_MESSAGE_CHARS = 48_000;
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } });
@@ -64,7 +65,7 @@ async function getProject(authHeader, env) {
 function validateMessages(messages) {
   return Array.isArray(messages) && messages.length > 0 && messages.length <= MAX_MESSAGES &&
     messages.every(message => message && ['system', 'user', 'assistant'].includes(message.role) &&
-      typeof message.content === 'string' && message.content.length > 0 && message.content.length <= 12000);
+      typeof message.content === 'string' && message.content.length > 0 && message.content.length <= MAX_MESSAGE_CHARS);
 }
 
 async function readJsonLimited(request) {
@@ -136,7 +137,7 @@ export default {
     if (!ROUTE_MODES.includes(routeMode)) return apiError(400, 'Unsupported route mode', 'UNSUPPORTED_ROUTE_MODE');
     if (body.stream !== undefined && typeof body.stream !== 'boolean') return apiError(400, 'stream must be a boolean', 'INVALID_STREAM_FLAG');
     try {
-      const result = await runGatewayChat({ env, messages: body.messages, provider, routeMode, max_tokens: body.max_tokens, temperature: body.temperature, stream: body.stream === true });
+      const result = await runGatewayChat({ env, messages: body.messages, provider, routeMode, max_tokens: body.max_tokens, temperature: body.temperature, model: body.model, stream: body.stream === true });
       const id = `chatcmpl-${crypto.randomUUID()}`;
       const created = Math.floor(Date.now() / 1000);
       logRequest({

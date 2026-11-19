@@ -12,7 +12,7 @@ Deployed to Cloudflare Workers through the manual `Deploy Universal AI Gateway` 
 - `GET /v1/models` (requires a project token; lists only the routes configured for this Worker)
 - `POST /v1/chat/completions`
 
-The API is compatible with official OpenAI SDKs: point `baseURL` at `https://<worker>/v1` and use the project token as the API key. The `model` field is ignored; routing is controlled by `provider` and `routeMode`.
+The API is compatible with official OpenAI SDKs: point `baseURL` at `https://<worker>/v1` and use the project token as the API key. Routing is controlled by `provider` and `routeMode`. The `model` field is honored only for Workers AI and only as an `@cf/...` id (for example `@cf/google/gemma-4-26b-a4b-it`); other values, such as the `gpt-4o` default of OpenAI SDKs, are ignored. Fallback providers always use their own configured models.
 
 Example request body:
 
@@ -52,7 +52,7 @@ The script generates a random token, stores it with `wrangler secret put`, and c
 
 ## Request protection
 
-The Worker applies a Cloudflare Rate Limiting binding after project authentication: 30 requests per 60-second window per project key. Cloudflare documents these limits as approximate and location-scoped, not strict global budgets; bursts can exceed the threshold while counters synchronize. This is a basic abuse guard, not a guaranteed daily AI-usage quota. Request bodies are capped at 32 KB and 40 messages.
+The Worker applies a Cloudflare Rate Limiting binding after project authentication: 30 requests per 60-second window per project key. Cloudflare documents these limits as approximate and location-scoped, not strict global budgets; bursts can exceed the threshold while counters synchronize. This is a basic abuse guard, not a guaranteed daily AI-usage quota. Request bodies are capped at 128 KB, 40 messages and 48,000 characters per message.
 
 ## Routing
 

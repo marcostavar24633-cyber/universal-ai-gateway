@@ -73,7 +73,7 @@ test('invalid messages are rejected', async () => {
 });
 
 test('oversized request body is rejected', async () => {
-  const response = await worker.fetch(request({ messages: [{ role: 'user', content: 'x'.repeat(33000) }] }), envFor());
+  const response = await worker.fetch(request({ messages: [{ role: 'user', content: 'x'.repeat(130000) }] }), envFor());
   assert.equal(response.status, 413);
 });
 
@@ -424,4 +424,18 @@ test('an invalid GATEWAY_PROJECT_KEYS secret does not disable individual project
   assert.equal(response.status, 200);
   assert.equal((await response.json()).project, 'bot');
   assert.equal((await worker.fetch(request({ messages: [{ role: 'user', content: 'hi' }] }, 'secret-a'), env)).status, 401);
+});
+
+test('a Workers AI model can be chosen per request by its @cf id', async () => {
+  const models = [];
+  const ai = { run: async model => { models.push(model); return { response: 'ok' }; } };
+  for (const model of ['@cf/google/gemma-4-26b-a4b-it', 'gpt-4o', '@cf/../etc', undefined]) {
+    await worker.fetch(request({ model, messages: [{ role: 'user', content: 'hi' }] }), envFor(ai));
+  }
+  assert.deepEqual(models, ['@cf/google/gemma-4-26b-a4b-it', '@cf/meta/llama-3.1-8b-instruct-fast', '@cf/meta/llama-3.1-8b-instruct-fast', '@cf/meta/llama-3.1-8b-instruct-fast']);
+});
+
+test('long studio prompts within the new limits are accepted', async () => {
+  const response = await worker.fetch(request({ messages: [{ role: 'user', content: 'я'.repeat(30000) }] }), envFor());
+  assert.equal(response.status, 200);
 });

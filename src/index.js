@@ -70,6 +70,12 @@ async function readJsonLimited(request) {
   return JSON.parse(new TextDecoder().decode(bytes));
 }
 
+// One JSON line per chat request for Workers Logs / `wrangler tail`.
+// Never includes message contents, tokens or provider keys.
+function logRequest(fields) {
+  console.log(JSON.stringify({ event: 'gateway_request', ...fields }));
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -79,13 +85,17 @@ export default {
       return json({ object: 'list', data: listModels(env) });
     }
     if (request.method !== 'POST' || url.pathname !== '/v1/chat/completions') return apiError(404, 'Not found', 'NOT_FOUND');
+    const startedAt = Date.now();
     const projectId = await getProject(request.headers.get('Authorization'), env);
     if (!projectId) return apiError(401, 'Unauthorized', 'INVALID_PROJECT_TOKEN');
 
     if (env.GATEWAY_RATE_LIMITER) {
       try {
         const { success } = await env.GATEWAY_RATE_LIMITER.limit({ key: projectId });
-        if (!success) return apiError(429, 'Project request rate limit exceeded', 'PROJECT_RATE_LIMIT');
+        if (!success) {
+          logRequest({ project: projectId, status: 429, code: 'PROJECT_RATE_LIMIT', ms: Date.now() - startedAt });
+          return apiError(429, 'Project request rate limit exceeded', 'PROJECT_RATE_LIMIT');
+        }
       } catch {
         return apiError(503, 'Rate limit service unavailable', 'RATE_LIMITER_UNAVAILABLE');
       }
@@ -109,6 +119,13 @@ export default {
       const result = await runGatewayChat({ env, messages: body.messages, provider, routeMode, max_tokens: body.max_tokens, temperature: body.temperature, stream: body.stream === true });
       const id = `chatcmpl-${crypto.randomUUID()}`;
       const created = Math.floor(Date.now() / 1000);
+      logRequest({
+        project: projectId, requestedProvider: provider, routeMode, stream: Boolean(result.events), status: 200,
+        provider: result.provider, model: result.model, fallback: result.fallback,
+        ...(result.fallbackAttempts ? { fallbackAttempts: result.fallbackAttempts } : {}),
+        ...(result.usage ? { usage: result.usage } : {}),
+        ms: Date.now() - startedAt,
+      });
       if (result.events) {
         return new Response(toOpenAISSE({ id, created, model: result.model, events: result.events }), {
           headers: {
@@ -118,6 +135,7 @@ export default {
             'X-Gateway-Provider': result.provider,
             'X-Gateway-Fallback': String(result.fallback),
             ...(result.fallbackReason ? { 'X-Gateway-Fallback-Reason': result.fallbackReason } : {}),
+            ...(result.fallbackAttempts ? { 'X-Gateway-Fallback-Attempts': result.fallbackAttempts.join(',') } : {}),
           },
         });
       }
@@ -133,9 +151,15 @@ export default {
         text: result.text,
         fallback: result.fallback,
         ...(result.fallbackReason ? { fallbackReason: result.fallbackReason } : {}),
+        ...(result.fallbackAttempts ? { fallbackAttempts: result.fallbackAttempts } : {}),
       });
     } catch (error) {
       const status = Number(error?.status) === 429 ? 429 : 503;
+      logRequest({
+        project: projectId, requestedProvider: provider, routeMode, stream: body.stream === true, status,
+        code: status === 429 ? 'PROVIDER_LIMIT' : 'PROVIDER_UNAVAILABLE', error: String(error?.message || error).slice(0, 200),
+        ms: Date.now() - startedAt,
+      });
       return status === 429
         ? apiError(429, 'Provider quota or rate limit reached', 'PROVIDER_LIMIT')
         : apiError(503, 'No configured AI route is currently available', 'PROVIDER_UNAVAILABLE');

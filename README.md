@@ -69,6 +69,12 @@ Add a key with `npx wrangler secret put GROQ_API_KEY` (no redeploy needed). Free
 
 Cloudflare Workers AI is the default. OpenRouter requires both `OPENROUTER_ENABLED=true` and the `OPENROUTER_API_KEY` secret. Direct OpenAI/Anthropic API access requires `AI_BILLING_MODE=api`, `AI_DIRECT_PROVIDERS_ENABLED=true`, and the corresponding server-side secret. Those APIs can incur separate charges and are disabled by default.
 
+## Logs
+
+Every chat request writes one JSON line (`"event":"gateway_request"`) with the project, requested and serving provider, model, fallback attempts, status or error code, token usage and duration. Message contents, project tokens and provider keys are never logged. Workers Logs is enabled in `wrangler.toml`, so the lines are searchable in the Cloudflare dashboard (Workers → universal-ai-gateway → Logs); `npx wrangler tail universal-ai-gateway` streams them live.
+
+Dependabot opens weekly pull requests for npm and GitHub Actions updates.
+
 ## Local validation
 
 ```sh

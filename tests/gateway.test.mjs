@@ -367,3 +367,46 @@ test('a fallback provider that does not respond in time hands over to the next o
   assert.deepEqual(calls, ['generativelanguage.googleapis.com', 'api.groq.com']);
   assert.ok(Date.now() - started < 2000);
 });
+
+const captureLogs = async run => {
+  const lines = [];
+  const original = console.log;
+  console.log = line => lines.push(line);
+  try { await run(); } finally { console.log = original; }
+  return lines.map(line => JSON.parse(line)).filter(entry => entry.event === 'gateway_request');
+};
+
+test('each chat request logs one line without message contents', async () => {
+  const logs = await captureLogs(async () => {
+    await worker.fetch(request({ messages: [{ role: 'user', content: 'top secret question' }] }), envFor());
+  });
+  assert.equal(logs.length, 1);
+  assert.equal(logs[0].project, 'project-a');
+  assert.equal(logs[0].provider, 'cloudflare');
+  assert.equal(logs[0].status, 200);
+  assert.equal(typeof logs[0].ms, 'number');
+  assert.ok(!JSON.stringify(logs).includes('top secret'));
+  assert.ok(!JSON.stringify(logs).includes('secret-a'));
+});
+
+test('provider failures are logged with their code', async () => {
+  const ai = { run: async () => { throw new Error('bad request'); } };
+  const logs = await captureLogs(async () => {
+    await worker.fetch(request({ messages: [{ role: 'user', content: 'hi' }] }), envFor(ai));
+  });
+  assert.equal(logs[0].status, 503);
+  assert.equal(logs[0].code, 'PROVIDER_UNAVAILABLE');
+});
+
+test('fallback attempts are returned in the response body', async () => {
+  const env = { ...envFor(quotaAI), FALLBACK_CHAIN: 'groq', GROQ_API_KEY: 'g' };
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), { status: 200 });
+  try {
+    const data = await (await worker.fetch(request({ messages: [{ role: 'user', content: 'hi' }] }), env)).json();
+    assert.deepEqual(data.fallbackAttempts, ['groq']);
+    assert.equal(data.provider, 'groq');
+  } finally {
+    globalThis.fetch = original;
+  }
+});

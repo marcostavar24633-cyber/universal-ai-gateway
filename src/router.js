@@ -121,9 +121,22 @@ function upstreamError(label, response) {
   return error;
 }
 
-// Fallback providers from FALLBACK_CHAIN, in order, without duplicates or unknown names.
-export function fallbackChain(env) {
-  const names = String(env.FALLBACK_CHAIN ?? DEFAULT_FALLBACK_CHAIN).split(',').map(name => name.trim().toLowerCase());
+// Per-project override of FALLBACK_CHAIN from the PROJECT_FALLBACK_CHAINS JSON
+// variable, e.g. {"unique-design-studio":"groq"}. An empty string disables fallback.
+export function projectFallbackChain(env, projectId) {
+  if (!projectId || !env.PROJECT_FALLBACK_CHAINS) return undefined;
+  try {
+    const chains = JSON.parse(env.PROJECT_FALLBACK_CHAINS);
+    return typeof chains?.[projectId] === 'string' ? chains[projectId] : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// Fallback providers from FALLBACK_CHAIN (or a project override), in order,
+// without duplicates or unknown names.
+export function fallbackChain(env, override) {
+  const names = String(override ?? env.FALLBACK_CHAIN ?? DEFAULT_FALLBACK_CHAIN).split(',').map(name => name.trim().toLowerCase());
   return [...new Set(names)].filter(name => FALLBACK_PROVIDERS.has(name));
 }
 
@@ -131,10 +144,10 @@ export function fallbackChain(env) {
 // { text?, finishReason?, usage? }) instead of `text`/`finishReason`/`usage`.
 // Upstream errors are raised before any event is produced, so fallback
 // behaves the same for streaming and non-streaming requests.
-export async function runGatewayChat({ env, messages, provider = 'cloudflare', routeMode = 'auto', max_tokens, temperature, model, stream = false, fetchImpl = fetch }) {
+export async function runGatewayChat({ env, messages, provider = 'cloudflare', routeMode = 'auto', max_tokens, temperature, model, stream = false, projectId, fetchImpl = fetch }) {
   const primary = PROVIDERS.includes(provider) ? provider : 'cloudflare';
   if (!ROUTE_MODES.includes(routeMode)) throw new Error('Unsupported route mode');
-  const request = { env, messages, generation: generationOptions({ max_tokens, temperature }), model, stream: stream === true, fetchImpl };
+  const request = { env, messages, generation: generationOptions({ max_tokens, temperature }), model, stream: stream === true, chainOverride: projectFallbackChain(env, projectId), fetchImpl };
 
   if (routeMode === 'openrouter') return runProvider('openrouter', request);
 
@@ -149,7 +162,7 @@ export async function runGatewayChat({ env, messages, provider = 'cloudflare', r
 // Tries each configured fallback provider in order. Providers without keys are
 // skipped; a provider that is out of quota or unavailable hands over to the next.
 async function runFallbackChain(primary, request) {
-  const candidates = fallbackChain(request.env).filter(name => name !== primary && OPENAI_COMPATIBLE_PROVIDERS[name].enabled(request.env));
+  const candidates = fallbackChain(request.env, request.chainOverride).filter(name => name !== primary && OPENAI_COMPATIBLE_PROVIDERS[name].enabled(request.env));
   const attempted = [];
   let lastError;
   for (const name of candidates) {

@@ -439,3 +439,24 @@ test('long studio prompts within the new limits are accepted', async () => {
   const response = await worker.fetch(request({ messages: [{ role: 'user', content: 'я'.repeat(30000) }] }), envFor());
   assert.equal(response.status, 200);
 });
+
+test('a project-specific fallback chain overrides the global one', async () => {
+  const env = { ...envFor(quotaAI), FALLBACK_CHAIN: 'gemini,groq', GEMINI_API_KEY: 'm', GROQ_API_KEY: 'g',
+    PROJECT_FALLBACK_CHAINS: JSON.stringify({ 'project-a': 'groq' }) };
+  const hosts = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = async url => { hosts.push(new URL(url).hostname); return new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), { status: 200 }); };
+  try {
+    const data = await (await worker.fetch(request({ messages: [{ role: 'user', content: 'hi' }] }), env)).json();
+    assert.equal(data.provider, 'groq');
+    assert.deepEqual(hosts, ['api.groq.com']);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test('an empty project chain disables fallback for that project', async () => {
+  const env = { ...envFor(quotaAI), FALLBACK_CHAIN: 'groq', GROQ_API_KEY: 'g', PROJECT_FALLBACK_CHAINS: JSON.stringify({ 'project-a': '' }) };
+  const response = await worker.fetch(request({ messages: [{ role: 'user', content: 'hi' }] }), env);
+  assert.equal(response.status, 429);
+});

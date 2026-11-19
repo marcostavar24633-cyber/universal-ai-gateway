@@ -11,6 +11,9 @@ FALLBACK_CHAIN = "groq,gemini,openrouter,cerebras,mistral"
 # so it falls back only to Groq, whose free tier allows production use.
 PROJECT_FALLBACK_CHAINS = '{"unique-design-studio":"groq"}'
 CF_AI_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast"
+# Valid chat requests per project per UTC day; PROJECT_DAILY_LIMITS overrides it per project, 0 disables.
+DAILY_REQUEST_LIMIT = "1000"
+PROJECT_DAILY_LIMITS = '{}'
 
 [observability]
 enabled = true
@@ -25,3 +28,11 @@ namespace_id = "9026111801"
 [ratelimits.simple]
 limit = 30
 period = 60
+
+[[durable_objects.bindings]]
+name = "PROJECT_QUOTA"
+class_name = "ProjectQuota"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ProjectQuota"]

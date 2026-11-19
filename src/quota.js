@@ -33,8 +33,16 @@ export class ProjectQuota {
     this.ctx = ctx;
   }
 
-  // POST {limit, now?} -> {allowed, count, limit, remaining, resetAt}
+  // POST {limit, now?} -> {allowed, count, limit, remaining, resetAt}: counts one request.
+  // GET ?limit=N        -> {count, limit, remaining, resetAt}: read-only.
   async fetch(request) {
+    if (request.method === 'GET') {
+      const limit = Number(new URL(request.url).searchParams.get('limit'));
+      const now = Date.now();
+      const stored = await this.ctx.storage.get('usage');
+      const count = stored?.day === utcDay(now) ? stored.count : 0;
+      return Response.json({ count, limit, remaining: Math.max(0, limit - count), resetAt: nextUtcMidnight(now) });
+    }
     const { limit, now = Date.now() } = await request.json();
     const day = utcDay(now);
     const stored = await this.ctx.storage.get('usage');
@@ -47,6 +55,15 @@ export class ProjectQuota {
     await this.ctx.storage.put('usage', usage);
     return Response.json({ allowed: true, count: usage.count, limit, remaining: limit - usage.count, resetAt });
   }
+}
+
+// Read-only view of today's usage; null when the quota is off for the project.
+export async function peekDailyQuota(env, projectId) {
+  if (!env.PROJECT_QUOTA) return null;
+  const limit = dailyLimit(env, projectId);
+  if (limit === 0) return null;
+  const stub = env.PROJECT_QUOTA.get(env.PROJECT_QUOTA.idFromName(projectId));
+  return (await stub.fetch(`https://project-quota/peek?limit=${limit}`)).json();
 }
 
 // Returns null when the quota is not configured, disabled for the project, or

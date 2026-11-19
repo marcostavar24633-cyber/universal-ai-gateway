@@ -258,6 +258,11 @@ async function runAnthropic({ env, messages, generation, stream, fetchImpl }) {
   };
 }
 
+// Fallback providers that would actually be tried for this project (configured keys only).
+export function activeFallbacks(env, projectId) {
+  return fallbackChain(env, projectFallbackChain(env, projectId)).filter(name => OPENAI_COMPATIBLE_PROVIDERS[name].enabled(env));
+}
+
 // Models a project can reach with the current configuration, in OpenAI list format.
 export function listModels(env) {
   const entries = [];

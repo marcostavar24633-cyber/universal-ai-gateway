@@ -9,6 +9,9 @@ OPENROUTER_ENABLED = "true"
 FALLBACK_CHAIN = "groq,gemini,openrouter,cerebras,mistral"
 CF_AI_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast"
 
+[observability]
+enabled = true
+
 [ai]
 binding = "AI"
 

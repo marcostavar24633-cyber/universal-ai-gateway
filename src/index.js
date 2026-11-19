@@ -137,7 +137,7 @@ export default {
     if (!ROUTE_MODES.includes(routeMode)) return apiError(400, 'Unsupported route mode', 'UNSUPPORTED_ROUTE_MODE');
     if (body.stream !== undefined && typeof body.stream !== 'boolean') return apiError(400, 'stream must be a boolean', 'INVALID_STREAM_FLAG');
     try {
-      const result = await runGatewayChat({ env, messages: body.messages, provider, routeMode, max_tokens: body.max_tokens, temperature: body.temperature, model: body.model, stream: body.stream === true, projectId });
+      const result = await runGatewayChat({ env, messages: body.messages, provider, routeMode, max_tokens: body.max_tokens, temperature: body.temperature, model: body.model, response_format: body.response_format, chat_template_kwargs: body.chat_template_kwargs, stream: body.stream === true, projectId });
       const id = `chatcmpl-${crypto.randomUUID()}`;
       const created = Math.floor(Date.now() / 1000);
       logRequest({

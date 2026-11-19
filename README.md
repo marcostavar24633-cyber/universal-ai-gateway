@@ -24,7 +24,7 @@ Example request body:
 }
 ```
 
-Optional fields: `max_tokens`, `temperature` (forwarded to every provider except Anthropic, which only receives `max_tokens`), and `stream`.
+Optional fields: `max_tokens`, `temperature` (forwarded to every provider except Anthropic, which only receives `max_tokens`), `stream`, `response_format` (`{"type":"json_object"}` or a `json_schema`; Workers AI and OpenAI-compatible providers) and `chat_template_kwargs` (a flat object of up to 8 scalar values, Workers AI only, e.g. `{"enable_thinking": false}` for models whose chat template supports it).
 
 Pass a project-specific token in `Authorization: Bearer <project-token>`.
 

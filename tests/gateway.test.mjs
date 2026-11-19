@@ -460,3 +460,24 @@ test('an empty project chain disables fallback for that project', async () => {
   const response = await worker.fetch(request({ messages: [{ role: 'user', content: 'hi' }] }), env);
   assert.equal(response.status, 429);
 });
+
+test('response_format and chat_template_kwargs reach Workers AI after validation', async () => {
+  let options;
+  const ai = { run: async (model, input) => { options = input; return { response: '{}' }; } };
+  await worker.fetch(request({ messages: [{ role: 'user', content: 'hi' }], response_format: { type: 'json_object' },
+    chat_template_kwargs: { enable_thinking: false, 'bad key': true, nested: { a: 1 } } }), envFor(ai));
+  assert.deepEqual(options.response_format, { type: 'json_object' });
+  assert.deepEqual(options.chat_template_kwargs, { enable_thinking: false });
+  await worker.fetch(request({ messages: [{ role: 'user', content: 'hi' }], response_format: { type: 'text' }, chat_template_kwargs: 'x' }), envFor(ai));
+  assert.equal('response_format' in options, false);
+  assert.equal('chat_template_kwargs' in options, false);
+});
+
+test('fallback providers get response_format but not chat_template_kwargs', async () => {
+  const sink = {};
+  const env = { AI: quotaAI, FALLBACK_CHAIN: 'groq', GROQ_API_KEY: 'g' };
+  await runGatewayChat({ env, messages: [{ role: 'user', content: 'hi' }], response_format: { type: 'json_object' }, chat_template_kwargs: { enable_thinking: false },
+    fetchImpl: captureFetch({ choices: [{ message: { content: '{}' } }] }, sink) });
+  assert.deepEqual(sink.body.response_format, { type: 'json_object' });
+  assert.equal('chat_template_kwargs' in sink.body, false);
+});

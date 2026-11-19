@@ -88,6 +88,28 @@ function openAIFinishReason(data) {
   return mapOpenAIFinishReason(data?.choices?.[0]?.finish_reason);
 }
 
+const isPlainObject = value => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+// Optional model options passed through after validation:
+// - response_format: OpenAI-style {type:"json_object"} or {type:"json_schema", json_schema:{...}}
+//   (Workers AI and OpenAI-compatible providers);
+// - chat_template_kwargs: flat object of up to 8 scalar values, e.g. {"enable_thinking":false}
+//   (Workers AI only; other providers ignore it).
+export function modelOptions({ response_format, chat_template_kwargs } = {}) {
+  const options = {};
+  if (isPlainObject(response_format) && ['json_object', 'json_schema'].includes(response_format.type)
+    && JSON.stringify(response_format).length <= 8000) {
+    options.response_format = response_format;
+  }
+  if (isPlainObject(chat_template_kwargs)) {
+    const entries = Object.entries(chat_template_kwargs)
+      .filter(([key, value]) => /^[a-z_]{1,40}$/.test(key) && ['boolean', 'number', 'string'].includes(typeof value) && String(value).length <= 200)
+      .slice(0, 8);
+    if (entries.length) options.chat_template_kwargs = Object.fromEntries(entries);
+  }
+  return options;
+}
+
 export function generationOptions({ max_tokens, temperature } = {}) {
   const options = {};
   if (Number.isInteger(max_tokens) && max_tokens > 0) options.max_tokens = Math.min(max_tokens, 8192);
@@ -144,10 +166,10 @@ export function fallbackChain(env, override) {
 // { text?, finishReason?, usage? }) instead of `text`/`finishReason`/`usage`.
 // Upstream errors are raised before any event is produced, so fallback
 // behaves the same for streaming and non-streaming requests.
-export async function runGatewayChat({ env, messages, provider = 'cloudflare', routeMode = 'auto', max_tokens, temperature, model, stream = false, projectId, fetchImpl = fetch }) {
+export async function runGatewayChat({ env, messages, provider = 'cloudflare', routeMode = 'auto', max_tokens, temperature, model, response_format, chat_template_kwargs, stream = false, projectId, fetchImpl = fetch }) {
   const primary = PROVIDERS.includes(provider) ? provider : 'cloudflare';
   if (!ROUTE_MODES.includes(routeMode)) throw new Error('Unsupported route mode');
-  const request = { env, messages, generation: generationOptions({ max_tokens, temperature }), model, stream: stream === true, chainOverride: projectFallbackChain(env, projectId), fetchImpl };
+  const request = { env, messages, generation: generationOptions({ max_tokens, temperature }), extras: modelOptions({ response_format, chat_template_kwargs }), model, stream: stream === true, chainOverride: projectFallbackChain(env, projectId), fetchImpl };
 
   if (routeMode === 'openrouter') return runProvider('openrouter', request);
 
@@ -187,23 +209,23 @@ function runProvider(name, request) {
   return runOpenAICompatible(name, config, request);
 }
 
-async function runCloudflare({ env, messages, generation, model: requestedModel, stream }) {
+async function runCloudflare({ env, messages, generation, extras = {}, model: requestedModel, stream }) {
   if (!env.AI) throw new Error('Cloudflare AI binding is not configured');
   const model = cloudflareModel(env, requestedModel);
-  const result = await env.AI.run(model, { messages, ...generation, ...(stream ? { stream: true } : {}) });
+  const result = await env.AI.run(model, { messages, ...generation, ...extras, ...(stream ? { stream: true } : {}) });
   const maxTokens = generation.max_tokens || CF_DEFAULT_MAX_TOKENS;
   if (stream) return { provider: 'cloudflare', model, events: cloudflareStreamEvents(result, maxTokens), fallback: false };
   const usage = toOpenAIUsage(result?.usage);
   return { provider: 'cloudflare', model, text: normalizeTextResponse(result), finishReason: cloudflareFinishReason(usage, maxTokens), usage, fallback: false };
 }
 
-async function runOpenAICompatible(name, config, { env, messages, generation, stream, fetchImpl }) {
+async function runOpenAICompatible(name, config, { env, messages, generation, extras = {}, stream, fetchImpl }) {
   if (!config.enabled(env)) throw new Error(config.disabledMessage || `${config.label} is not enabled or configured`);
   const model = config.model(env);
   const response = await fetchWithTimeout(fetchImpl, config.url, {
     method: 'POST',
     headers: { Authorization: `Bearer ${config.key(env)}`, 'Content-Type': 'application/json', ...(config.headers || {}) },
-    body: JSON.stringify({ model, messages, ...generation, ...(stream ? { stream: true, ...(config.streamOptions || {}) } : {}) }),
+    body: JSON.stringify({ model, messages, ...generation, ...(extras.response_format ? { response_format: extras.response_format } : {}), ...(stream ? { stream: true, ...(config.streamOptions || {}) } : {}) }),
   }, env, config.label);
   if (!response.ok) throw upstreamError(config.label, response);
   if (stream) return { provider: name, model, events: openAIStreamEvents(response.body), fallback: false };

@@ -10,6 +10,7 @@ Deployed to Cloudflare Workers through the manual `Deploy Universal AI Gateway` 
 
 - `GET /health`
 - `GET /v1/models` (requires a project token; lists only the routes configured for this Worker)
+- `GET /v1/status` (requires a project token): the project's primary model, the fallback providers that would actually be tried, and today's quota (`limit`, `used`, `remaining`, `resetAt`) without using it up
 - `POST /v1/chat/completions`
 
 The API is compatible with official OpenAI SDKs: point `baseURL` at `https://<worker>/v1` and use the project token as the API key. Routing is controlled by `provider` and `routeMode`. The `model` field is honored only for Workers AI and only as an `@cf/...` id (for example `@cf/google/gemma-4-26b-a4b-it`); other values, such as the `gpt-4o` default of OpenAI SDKs, are ignored. Fallback providers always use their own configured models.

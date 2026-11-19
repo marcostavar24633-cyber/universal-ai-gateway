@@ -544,3 +544,18 @@ test('a failing quota store does not block requests', async () => {
   assert.equal(response.status, 200);
   assert.equal((await response.json()).quota, undefined);
 });
+
+test('status reports quota without using it up and lists only working fallbacks', async () => {
+  const env = { ...envFor(), PROJECT_QUOTA: quotaNamespace(), DAILY_REQUEST_LIMIT: '5', GROQ_API_KEY: 'g',
+    PROJECT_FALLBACK_CHAINS: JSON.stringify({ 'project-a': 'groq,gemini' }) };
+  const status = () => worker.fetch(new Request('https://gateway.test/v1/status', { headers: { Authorization: 'Bearer secret-a' } }), env);
+  await worker.fetch(request({ messages: [{ role: 'user', content: 'hi' }] }), env);
+  const first = await (await status()).json();
+  const second = await (await status()).json();
+  assert.equal(first.project, 'project-a');
+  assert.deepEqual(first.fallback, ['groq']);
+  assert.equal(first.primary.provider, 'cloudflare');
+  assert.deepEqual([first.quota.limit, first.quota.used, first.quota.remaining], [5, 1, 4]);
+  assert.equal(second.quota.used, 1);
+  assert.equal((await worker.fetch(new Request('https://gateway.test/v1/status'), env)).status, 401);
+});

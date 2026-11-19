@@ -1,6 +1,6 @@
-import { listModels, PROVIDERS, ROUTE_MODES, runGatewayChat } from './router.js';
+import { activeFallbacks, cloudflareModel, listModels, PROVIDERS, ROUTE_MODES, runGatewayChat } from './router.js';
 import { toOpenAISSE } from './stream.js';
-import { checkDailyQuota } from './quota.js';
+import { checkDailyQuota, peekDailyQuota } from './quota.js';
 
 export { ProjectQuota } from './quota.js';
 
@@ -107,6 +107,19 @@ export default {
     if (request.method === 'GET' && url.pathname === '/v1/models') {
       if (!(await getProject(request.headers.get('Authorization'), env))) return apiError(401, 'Unauthorized', 'INVALID_PROJECT_TOKEN');
       return json({ object: 'list', data: listModels(env) });
+    }
+    if (request.method === 'GET' && url.pathname === '/v1/status') {
+      const statusProject = await getProject(request.headers.get('Authorization'), env);
+      if (!statusProject) return apiError(401, 'Unauthorized', 'INVALID_PROJECT_TOKEN');
+      let quota = null;
+      try { quota = await peekDailyQuota(env, statusProject); } catch { quota = null; }
+      return json({
+        ok: true,
+        project: statusProject,
+        primary: { provider: 'cloudflare', model: cloudflareModel(env), configured: Boolean(env.AI) },
+        fallback: activeFallbacks(env, statusProject),
+        quota: quota ? { limit: quota.limit, used: quota.count, remaining: quota.remaining, resetAt: new Date(quota.resetAt).toISOString() } : null,
+      });
     }
     if (request.method !== 'POST' || url.pathname !== '/v1/chat/completions') return apiError(404, 'Not found', 'NOT_FOUND');
     const startedAt = Date.now();

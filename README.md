@@ -40,6 +40,16 @@ Workers AI does not report why generation stopped, so the gateway returns `finis
 
 Set `GATEWAY_PROJECT_KEYS` as a Cloudflare Worker secret containing a JSON object mapping project IDs to long, unique random tokens. Never expose tokens or provider keys in browser code or commit them to Git.
 
+### Adding a project
+
+Cloudflare secrets cannot be read back, so appending to `GATEWAY_PROJECT_KEYS` means rewriting every token. Instead, give each new project its own secret `PROJECT_KEY_<NAME>` (`PROJECT_KEY_MY_SITE` authenticates project `my-site`):
+
+```sh
+npm run add-project -- my-site
+```
+
+The script generates a random token, stores it with `wrangler secret put`, and copies it to the clipboard without printing it (`--print` shows it). No redeploy is needed. To revoke a project, delete its secret with `npx wrangler secret delete PROJECT_KEY_<NAME>`. If a name exists in both places, `GATEWAY_PROJECT_KEYS` wins.
+
 ## Request protection
 
 The Worker applies a Cloudflare Rate Limiting binding after project authentication: 30 requests per 60-second window per project key. Cloudflare documents these limits as approximate and location-scoped, not strict global budgets; bursts can exceed the threshold while counters synchronize. This is a basic abuse guard, not a guaranteed daily AI-usage quota. Request bodies are capped at 32 KB and 40 messages.

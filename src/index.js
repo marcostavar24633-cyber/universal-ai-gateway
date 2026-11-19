@@ -26,10 +26,30 @@ function apiError(status, message, code) {
   return json({ error: { message, type: ERROR_TYPES[status] || 'api_error', code } }, status);
 }
 
+const PROJECT_KEY_PREFIX = 'PROJECT_KEY_';
+
+// Project tokens come from the GATEWAY_PROJECT_KEYS JSON secret and from
+// individual PROJECT_KEY_<NAME> secrets (PROJECT_KEY_MY_SITE -> "my-site").
+// Individual secrets let a project be added without rewriting the others.
+export function configuredProjectKeys(env) {
+  let keys = {};
+  try {
+    const parsed = JSON.parse(env.GATEWAY_PROJECT_KEYS || '{}');
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) keys = { ...parsed };
+  } catch {
+    // An invalid JSON secret must not disable the individual project secrets.
+  }
+  for (const [name, value] of Object.entries(env)) {
+    if (!name.startsWith(PROJECT_KEY_PREFIX) || typeof value !== 'string') continue;
+    const projectId = name.slice(PROJECT_KEY_PREFIX.length).toLowerCase().replace(/_/g, '-');
+    if (projectId && !(projectId in keys)) keys[projectId] = value;
+  }
+  return keys;
+}
+
 async function getProject(authHeader, env) {
   if (!authHeader?.startsWith('Bearer ')) return null;
-  let keys;
-  try { keys = JSON.parse(env.GATEWAY_PROJECT_KEYS || '{}'); } catch { return null; }
+  const keys = configuredProjectKeys(env);
   const token = authHeader.slice(7).trim();
   if (!token || token.length > 256) return null;
   const tokenDigest = await sha256(token);

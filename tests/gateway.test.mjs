@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker from '../src/index.js';
 import { runGatewayChat } from '../src/router.js';
+import { toOpenAISSE } from '../src/stream.js';
 
 const envFor = (ai = { run: async () => ({ response: 'hello' }) }, limiter = async () => ({ success: true })) => ({
   GATEWAY_PROJECT_KEYS: JSON.stringify({ 'project-a': 'secret-a' }),
@@ -171,4 +172,78 @@ test('Anthropic defaults to the current Haiku model', async () => {
     fetchImpl: captureFetch({ content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' }, sink) });
   assert.equal(sink.body.model, 'claude-haiku-5-5');
   assert.equal(result.model, 'claude-haiku-5-5');
+});
+
+const sseBody = lines => new ReadableStream({
+  start(controller) {
+    const encoder = new TextEncoder();
+    // Split mid-line to exercise buffering across chunks.
+    const text = lines.map(line => `data: ${typeof line === 'string' ? line : JSON.stringify(line)}\n\n`).join('');
+    const middle = Math.floor(text.length / 2);
+    controller.enqueue(encoder.encode(text.slice(0, middle)));
+    controller.enqueue(encoder.encode(text.slice(middle)));
+    controller.close();
+  },
+});
+const readSSEPayloads = async response => (await response.text()).split('\n\n').filter(Boolean).map(block => block.replace(/^data: /, ''));
+
+test('streaming Workers AI responses are re-emitted as OpenAI chunks', async () => {
+  let options;
+  const ai = { run: async (model, input) => { options = input; return sseBody([{ response: 'Hel' }, { response: 'lo' }, { response: '', usage: { prompt_tokens: 4, completion_tokens: 2 } }, '[DONE]']); } };
+  const response = await worker.fetch(request({ stream: true, messages: [{ role: 'user', content: 'hi' }] }), envFor(ai));
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('Content-Type'), /text\/event-stream/);
+  assert.equal(response.headers.get('X-Gateway-Provider'), 'cloudflare');
+  assert.equal(options.stream, true);
+  const payloads = await readSSEPayloads(response);
+  assert.equal(payloads.at(-1), '[DONE]');
+  const chunks = payloads.slice(0, -1).map(payload => JSON.parse(payload));
+  assert.ok(chunks.every(chunk => chunk.object === 'chat.completion.chunk' && chunk.id === chunks[0].id));
+  assert.equal(chunks[0].choices[0].delta.role, 'assistant');
+  assert.equal(chunks.map(chunk => chunk.choices[0].delta.content || '').join(''), 'Hello');
+  assert.equal(chunks.at(-1).choices[0].finish_reason, 'stop');
+  assert.deepEqual(chunks.at(-1).usage, { prompt_tokens: 4, completion_tokens: 2, total_tokens: 6 });
+});
+
+test('non-boolean stream flag is rejected', async () => {
+  const response = await worker.fetch(request({ stream: 'yes', messages: [{ role: 'user', content: 'hi' }] }), envFor());
+  assert.equal(response.status, 400);
+});
+
+test('streaming quota errors still fall back to OpenRouter before the first byte', async () => {
+  let requested;
+  const env = { AI: { run: async () => { const error = new Error('quota exceeded'); error.status = 429; throw error; } }, OPENROUTER_ENABLED: 'true', OPENROUTER_API_KEY: 'test-key' };
+  const result = await runGatewayChat({ env, stream: true, messages: [{ role: 'user', content: 'hi' }], fetchImpl: async (url, options) => {
+    requested = JSON.parse(options.body);
+    return new Response(sseBody([{ choices: [{ delta: { content: 'ok' } }] }, { choices: [{ delta: {}, finish_reason: 'length' }] }, '[DONE]']), { status: 200 });
+  } });
+  assert.equal(result.fallback, true);
+  assert.equal(requested.stream, true);
+  const events = [];
+  for await (const event of result.events) events.push(event);
+  assert.equal(events.map(event => event.text || '').join(''), 'ok');
+  assert.equal(events.at(-1).finishReason, 'length');
+});
+
+test('Anthropic stream events map to text, finish reason, and usage', async () => {
+  const env = { AI_BILLING_MODE: 'api', AI_DIRECT_PROVIDERS_ENABLED: 'true', ANTHROPIC_API_KEY: 'test-key' };
+  const result = await runGatewayChat({ env, provider: 'anthropic', routeMode: 'primary', stream: true, messages: [{ role: 'user', content: 'hi' }], fetchImpl: async () => new Response(sseBody([
+    { type: 'message_start', message: { usage: { input_tokens: 3 } } },
+    { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Hi' } },
+    { type: 'content_block_delta', delta: { type: 'text_delta', text: ' there' } },
+    { type: 'message_delta', delta: { stop_reason: 'max_tokens' }, usage: { output_tokens: 2 } },
+    { type: 'message_stop' },
+  ]), { status: 200 }) });
+  const response = new Response(toOpenAISSE({ id: 'chatcmpl-test', created: 0, model: result.model, events: result.events }));
+  const chunks = (await readSSEPayloads(response)).slice(0, -1).map(payload => JSON.parse(payload));
+  assert.equal(chunks.map(chunk => chunk.choices[0].delta.content || '').join(''), 'Hi there');
+  assert.equal(chunks.at(-1).choices[0].finish_reason, 'length');
+  assert.deepEqual(chunks.at(-1).usage, { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 });
+});
+
+test('mid-stream upstream errors end the stream with an error event', async () => {
+  const events = (async function* () { yield { text: 'partial' }; throw new Error('socket closed'); })();
+  const payloads = await readSSEPayloads(new Response(toOpenAISSE({ id: 'chatcmpl-test', created: 0, model: 'm', events })));
+  assert.equal(JSON.parse(payloads.at(-2)).error.code, 'STREAM_INTERRUPTED');
+  assert.equal(payloads.at(-1), '[DONE]');
 });

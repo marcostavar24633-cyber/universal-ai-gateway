@@ -1,4 +1,4 @@
-import { listModels, runGatewayChat } from './router.js';
+import { listModels, PROVIDERS, ROUTE_MODES, runGatewayChat } from './router.js';
 import { toOpenAISSE } from './stream.js';
 
 const MAX_BODY_BYTES = 32_000;
@@ -102,8 +102,8 @@ export default {
     }
     const provider = typeof body.provider === 'string' ? body.provider : 'cloudflare';
     const routeMode = typeof body.routeMode === 'string' ? body.routeMode : 'auto';
-    if (!['cloudflare', 'openai', 'anthropic'].includes(provider)) return apiError(400, 'Unsupported provider', 'UNSUPPORTED_PROVIDER');
-    if (!['auto', 'primary', 'openrouter'].includes(routeMode)) return apiError(400, 'Unsupported route mode', 'UNSUPPORTED_ROUTE_MODE');
+    if (!PROVIDERS.includes(provider)) return apiError(400, 'Unsupported provider', 'UNSUPPORTED_PROVIDER');
+    if (!ROUTE_MODES.includes(routeMode)) return apiError(400, 'Unsupported route mode', 'UNSUPPORTED_ROUTE_MODE');
     if (body.stream !== undefined && typeof body.stream !== 'boolean') return apiError(400, 'stream must be a boolean', 'INVALID_STREAM_FLAG');
     try {
       const result = await runGatewayChat({ env, messages: body.messages, provider, routeMode, max_tokens: body.max_tokens, temperature: body.temperature, stream: body.stream === true });

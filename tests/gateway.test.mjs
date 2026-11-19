@@ -283,3 +283,69 @@ test('streamed Workers AI replies that exhaust max_tokens end with length', asyn
   const payloads = await readSSEPayloads(response);
   assert.equal(JSON.parse(payloads.at(-2)).choices[0].finish_reason, 'length');
 });
+
+const quotaAI = { run: async () => { const error = new Error('neurons daily limit'); error.status = 429; throw error; } };
+const chainFetch = (outcomes, calls) => async url => {
+  const host = new URL(url).hostname;
+  calls.push(host);
+  const outcome = outcomes[host] ?? 200;
+  if (outcome !== 200) return new Response('{}', { status: outcome });
+  return new Response(JSON.stringify({ choices: [{ message: { content: `from ${host}` }, finish_reason: 'stop' }] }), { status: 200 });
+};
+
+test('fallback chain skips unconfigured providers and moves past exhausted ones', async () => {
+  const calls = [];
+  const env = { AI: quotaAI, FALLBACK_CHAIN: 'groq,cerebras,gemini', GROQ_API_KEY: 'g', GEMINI_API_KEY: 'm' };
+  const result = await runGatewayChat({ env, messages: [{ role: 'user', content: 'hi' }],
+    fetchImpl: chainFetch({ 'api.groq.com': 429 }, calls) });
+  assert.deepEqual(calls, ['api.groq.com', 'generativelanguage.googleapis.com']);
+  assert.equal(result.provider, 'gemini');
+  assert.equal(result.text, 'from generativelanguage.googleapis.com');
+  assert.equal(result.fallback, true);
+  assert.deepEqual(result.fallbackAttempts, ['groq', 'gemini']);
+});
+
+test('fallback chain continues past unavailable providers too', async () => {
+  const calls = [];
+  const env = { AI: quotaAI, FALLBACK_CHAIN: 'mistral,groq', MISTRAL_API_KEY: 'x', GROQ_API_KEY: 'g' };
+  const result = await runGatewayChat({ env, messages: [{ role: 'user', content: 'hi' }],
+    fetchImpl: chainFetch({ 'api.mistral.ai': 500 }, calls) });
+  assert.equal(result.provider, 'groq');
+});
+
+test('fallback chain order is configurable and ignores unknown or paid providers', async () => {
+  const calls = [];
+  const env = { AI: quotaAI, FALLBACK_CHAIN: ' OpenAI , github, nope, groq ', GITHUB_MODELS_TOKEN: 't', GROQ_API_KEY: 'g',
+    AI_BILLING_MODE: 'api', AI_DIRECT_PROVIDERS_ENABLED: 'true', OPENAI_API_KEY: 'k' };
+  const result = await runGatewayChat({ env, messages: [{ role: 'user', content: 'hi' }], fetchImpl: chainFetch({}, calls) });
+  assert.deepEqual(calls, ['models.github.ai']);
+  assert.equal(result.provider, 'github');
+});
+
+test('exhausted fallback chain returns PROVIDER_LIMIT', async () => {
+  const env = { ...envFor(quotaAI), FALLBACK_CHAIN: 'groq', GROQ_API_KEY: 'g' };
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => new Response('{}', { status: 429 });
+  try {
+    const response = await worker.fetch(request({ messages: [{ role: 'user', content: 'hi' }] }), env);
+    assert.equal(response.status, 429);
+    assert.equal((await response.json()).error.code, 'PROVIDER_LIMIT');
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test('chain providers can be selected directly and appear in the models list', async () => {
+  const calls = [];
+  const env = { GROQ_API_KEY: 'g', GROQ_MODEL: 'llama-test' };
+  const result = await runGatewayChat({ env, provider: 'groq', routeMode: 'primary', messages: [{ role: 'user', content: 'hi' }], fetchImpl: chainFetch({}, calls) });
+  assert.equal(result.provider, 'groq');
+  assert.equal(result.model, 'llama-test');
+  const response = await worker.fetch(new Request('https://gateway.test/v1/models', { headers: { Authorization: 'Bearer secret-a' } }), { ...envFor(), ...env });
+  assert.ok((await response.json()).data.some(model => model.owned_by === 'groq' && model.id === 'llama-test'));
+});
+
+test('unknown provider names are rejected', async () => {
+  const response = await worker.fetch(request({ provider: 'skynet', messages: [{ role: 'user', content: 'hi' }] }), envFor());
+  assert.equal(response.status, 400);
+});

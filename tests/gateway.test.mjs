@@ -101,3 +101,36 @@ test('non-quota primary errors do not trigger fallback', async () => {
 test('paid direct providers remain disabled unless explicitly opted in', async () => {
   await assert.rejects(() => runGatewayChat({ env: { AI_BILLING_MODE: 'free', AI_DIRECT_PROVIDERS_ENABLED: 'false' }, provider: 'openai', messages: [{ role: 'user', content: 'hi' }] }), /disabled or not configured/);
 });
+
+const captureFetch = (responseBody, sink) => async (url, options) => {
+  sink.url = url;
+  sink.body = JSON.parse(options.body);
+  return new Response(JSON.stringify(responseBody), { status: 200, headers: { 'Content-Type': 'application/json' } });
+};
+
+test('generation options are forwarded to OpenRouter', async () => {
+  const sink = {};
+  const env = { OPENROUTER_ENABLED: 'true', OPENROUTER_API_KEY: 'test-key' };
+  await runGatewayChat({ env, routeMode: 'openrouter', messages: [{ role: 'user', content: 'hi' }], max_tokens: 99999, temperature: 5,
+    fetchImpl: captureFetch({ choices: [{ message: { content: 'ok' } }] }, sink) });
+  assert.equal(sink.body.max_tokens, 8192);
+  assert.equal(sink.body.temperature, 2);
+});
+
+test('generation options are forwarded to OpenAI when enabled', async () => {
+  const sink = {};
+  const env = { AI_BILLING_MODE: 'api', AI_DIRECT_PROVIDERS_ENABLED: 'true', OPENAI_API_KEY: 'test-key' };
+  await runGatewayChat({ env, provider: 'openai', routeMode: 'primary', messages: [{ role: 'user', content: 'hi' }], max_tokens: 50, temperature: 0.3,
+    fetchImpl: captureFetch({ choices: [{ message: { content: 'ok' } }] }, sink) });
+  assert.equal(sink.body.max_tokens, 50);
+  assert.equal(sink.body.temperature, 0.3);
+});
+
+test('Anthropic receives max_tokens but never temperature', async () => {
+  const sink = {};
+  const env = { AI_BILLING_MODE: 'api', AI_DIRECT_PROVIDERS_ENABLED: 'true', ANTHROPIC_API_KEY: 'test-key' };
+  await runGatewayChat({ env, provider: 'anthropic', routeMode: 'primary', messages: [{ role: 'user', content: 'hi' }], max_tokens: 64, temperature: 0.3,
+    fetchImpl: captureFetch({ content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' }, sink) });
+  assert.equal(sink.body.max_tokens, 64);
+  assert.equal('temperature' in sink.body, false);
+});

@@ -15,39 +15,44 @@ function normalizeTextResponse(result) {
   return JSON.stringify(result ?? {});
 }
 
+export function generationOptions({ max_tokens, temperature } = {}) {
+  const options = {};
+  if (Number.isInteger(max_tokens) && max_tokens > 0) options.max_tokens = Math.min(max_tokens, 8192);
+  if (typeof temperature === 'number' && Number.isFinite(temperature)) options.temperature = Math.max(0, Math.min(2, temperature));
+  return options;
+}
+
 export async function runGatewayChat({ env, messages, provider = 'cloudflare', routeMode = 'auto', max_tokens, temperature, fetchImpl = fetch }) {
   const primary = ['cloudflare', 'openai', 'anthropic'].includes(provider) ? provider : 'cloudflare';
   if (!['auto', 'primary', 'openrouter'].includes(routeMode)) throw new Error('Unsupported route mode');
+  const generation = generationOptions({ max_tokens, temperature });
 
-  if (routeMode === 'openrouter') return runOpenRouter({ env, messages, fetchImpl });
+  if (routeMode === 'openrouter') return runOpenRouter({ env, messages, generation, fetchImpl });
 
   try {
     if (primary === 'cloudflare') {
       if (!env.AI) throw new Error('Cloudflare AI binding is not configured');
-      const options = { messages };
-      if (Number.isInteger(max_tokens) && max_tokens > 0) options.max_tokens = Math.min(max_tokens, 8192);
-      if (typeof temperature === 'number' && Number.isFinite(temperature)) options.temperature = Math.max(0, Math.min(2, temperature));
-      const result = await env.AI.run(env.CF_AI_MODEL || DEFAULT_CF_MODEL, options);
+      const result = await env.AI.run(env.CF_AI_MODEL || DEFAULT_CF_MODEL, { messages, ...generation });
       return { provider: 'cloudflare', model: env.CF_AI_MODEL || DEFAULT_CF_MODEL, text: normalizeTextResponse(result), fallback: false };
     }
-    if (primary === 'openai') return await runOpenAI({ env, messages, fetchImpl });
-    if (primary === 'anthropic') return await runAnthropic({ env, messages, fetchImpl });
+    if (primary === 'openai') return await runOpenAI({ env, messages, generation, fetchImpl });
+    if (primary === 'anthropic') return await runAnthropic({ env, messages, generation, fetchImpl });
     throw new Error('Unsupported provider');
   } catch (error) {
     if (routeMode !== 'auto' || !isQuotaError(error)) throw error;
-    const result = await runOpenRouter({ env, messages, fetchImpl });
+    const result = await runOpenRouter({ env, messages, generation, fetchImpl });
     return { ...result, fallback: true, fallbackReason: 'primary_quota_exhausted' };
   }
 }
 
-async function runOpenRouter({ env, messages, fetchImpl }) {
+async function runOpenRouter({ env, messages, generation = {}, fetchImpl }) {
   if (env.OPENROUTER_ENABLED !== 'true' || !env.OPENROUTER_API_KEY) {
     throw new Error('OpenRouter Free fallback is not enabled or configured');
   }
   const response = await fetchImpl('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${env.OPENROUTER_API_KEY}`, 'Content-Type': 'application/json', 'X-Title': 'Universal AI Gateway' },
-    body: JSON.stringify({ model: OPENROUTER_FREE_MODEL, messages }),
+    body: JSON.stringify({ model: OPENROUTER_FREE_MODEL, messages, ...generation }),
   });
   if (!response.ok) {
     const error = new Error(`OpenRouter Free request failed (${response.status})`);
@@ -58,20 +63,20 @@ async function runOpenRouter({ env, messages, fetchImpl }) {
   return { provider: 'openrouter', model: OPENROUTER_FREE_MODEL, text: normalizeTextResponse(data), fallback: false };
 }
 
-async function runOpenAI({ env, messages, fetchImpl }) {
+async function runOpenAI({ env, messages, generation = {}, fetchImpl }) {
   if (env.AI_DIRECT_PROVIDERS_ENABLED !== 'true' || env.AI_BILLING_MODE !== 'api' || !env.OPENAI_API_KEY) {
     throw new Error('OpenAI API is disabled or not configured');
   }
   const response = await fetchImpl('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: env.OPENAI_MODEL || 'gpt-4.1-mini', messages }),
+    body: JSON.stringify({ model: env.OPENAI_MODEL || 'gpt-4.1-mini', messages, ...generation }),
   });
   if (!response.ok) { const error = new Error(`OpenAI API request failed (${response.status})`); error.status = response.status; throw error; }
   return { provider: 'openai', model: env.OPENAI_MODEL || 'gpt-4.1-mini', text: normalizeTextResponse(await response.json()), fallback: false };
 }
 
-async function runAnthropic({ env, messages, fetchImpl }) {
+async function runAnthropic({ env, messages, generation = {}, fetchImpl }) {
   if (env.AI_DIRECT_PROVIDERS_ENABLED !== 'true' || env.AI_BILLING_MODE !== 'api' || !env.ANTHROPIC_API_KEY) {
     throw new Error('Anthropic API is disabled or not configured');
   }
@@ -80,7 +85,7 @@ async function runAnthropic({ env, messages, fetchImpl }) {
   const response = await fetchImpl('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: env.ANTHROPIC_MODEL || 'claude-3-5-haiku-latest', max_tokens: 2048, ...(system ? { system } : {}), messages: input }),
+    body: JSON.stringify({ model: env.ANTHROPIC_MODEL || 'claude-3-5-haiku-latest', max_tokens: generation.max_tokens || 2048, ...(system ? { system } : {}), messages: input }),
   });
   if (!response.ok) { const error = new Error(`Anthropic API request failed (${response.status})`); error.status = response.status; throw error; }
   const data = await response.json();

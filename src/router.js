@@ -23,7 +23,7 @@ const directProvidersEnabled = env => env.AI_DIRECT_PROVIDERS_ENABLED === 'true'
 export const OPENAI_COMPATIBLE_PROVIDERS = {
   groq: {
     label: 'Groq', url: 'https://api.groq.com/openai/v1/chat/completions',
-    key: env => env.GROQ_API_KEY, model: env => env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+    key: env => env.GROQ_API_KEY, model: env => env.GROQ_MODEL || 'openai/gpt-oss-120b',
     enabled: env => Boolean(env.GROQ_API_KEY),
   },
   cerebras: {
@@ -33,7 +33,7 @@ export const OPENAI_COMPATIBLE_PROVIDERS = {
   },
   gemini: {
     label: 'Gemini', url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
-    key: env => env.GEMINI_API_KEY, model: env => env.GEMINI_MODEL || 'gemini-2.5-flash',
+    key: env => env.GEMINI_API_KEY, model: env => env.GEMINI_MODEL || 'gemini-flash-latest',
     enabled: env => Boolean(env.GEMINI_API_KEY),
   },
   mistral: {

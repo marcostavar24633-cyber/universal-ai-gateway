@@ -53,7 +53,7 @@ The Worker applies a Cloudflare Rate Limiting binding after project authenticati
 
 ### Fallback chain
 
-`FALLBACK_CHAIN` (in `wrangler.toml`) lists free-tier providers to try in order once the primary provider is out of quota: by default `groq,cerebras,gemini,mistral,github,openrouter`. A provider without its key is skipped; a provider that is itself out of quota or unavailable hands over to the next one. If every provider in the chain fails, the gateway returns `PROVIDER_LIMIT` (429) or `PROVIDER_UNAVAILABLE` (503). Paid providers (`openai`, `anthropic`) are never used as fallbacks. The non-streaming response includes `fallbackAttempts`, the providers tried in order.
+`FALLBACK_CHAIN` (in `wrangler.toml`) lists free-tier providers to try in order once the primary provider is out of quota: by default `groq,cerebras,gemini,mistral,openrouter`. A provider without its key is skipped; a provider that is itself out of quota or unavailable hands over to the next one. If every provider in the chain fails, the gateway returns `PROVIDER_LIMIT` (429) or `PROVIDER_UNAVAILABLE` (503). Paid providers (`openai`, `anthropic`) are never used as fallbacks. The non-streaming response includes `fallbackAttempts`, the providers tried in order.
 
 | Provider | Secret to set | Optional model variable (default) |
 |---|---|---|
@@ -61,7 +61,6 @@ The Worker applies a Cloudflare Rate Limiting binding after project authenticati
 | `cerebras` | `CEREBRAS_API_KEY` | `CEREBRAS_MODEL` (`llama-3.3-70b`) |
 | `gemini` | `GEMINI_API_KEY` | `GEMINI_MODEL` (`gemini-flash-latest`, an alias that follows the current Flash model) |
 | `mistral` | `MISTRAL_API_KEY` | `MISTRAL_MODEL` (`mistral-small-latest`) |
-| `github` | `GITHUB_MODELS_TOKEN` | `GITHUB_MODELS_MODEL` (`openai/gpt-4.1-mini`) |
 | `openrouter` | `OPENROUTER_API_KEY` plus `OPENROUTER_ENABLED=true` | fixed `openrouter/free` |
 
 Each provider gets 25 seconds to start responding (`PROVIDER_TIMEOUT_MS` overrides it); a provider that misses it counts as unavailable and the chain moves on.

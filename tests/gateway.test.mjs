@@ -315,11 +315,11 @@ test('fallback chain continues past unavailable providers too', async () => {
 
 test('fallback chain order is configurable and ignores unknown or paid providers', async () => {
   const calls = [];
-  const env = { AI: quotaAI, FALLBACK_CHAIN: ' OpenAI , github, nope, groq ', GITHUB_MODELS_TOKEN: 't', GROQ_API_KEY: 'g',
+  const env = { AI: quotaAI, FALLBACK_CHAIN: ' OpenAI , mistral, github, nope, groq ', MISTRAL_API_KEY: 't', GITHUB_MODELS_TOKEN: 't', GROQ_API_KEY: 'g',
     AI_BILLING_MODE: 'api', AI_DIRECT_PROVIDERS_ENABLED: 'true', OPENAI_API_KEY: 'k' };
   const result = await runGatewayChat({ env, messages: [{ role: 'user', content: 'hi' }], fetchImpl: chainFetch({}, calls) });
-  assert.deepEqual(calls, ['models.github.ai']);
-  assert.equal(result.provider, 'github');
+  assert.deepEqual(calls, ['api.mistral.ai']);
+  assert.equal(result.provider, 'mistral');
 });
 
 test('exhausted fallback chain returns PROVIDER_LIMIT', async () => {

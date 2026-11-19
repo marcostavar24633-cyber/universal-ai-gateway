@@ -13,7 +13,7 @@ export const OPENROUTER_FREE_MODEL = 'openrouter/free';
 export const DEFAULT_ANTHROPIC_MODEL = 'claude-haiku-5-5';
 // Workers AI applies this output limit when max_tokens is not sent.
 export const CF_DEFAULT_MAX_TOKENS = 256;
-export const DEFAULT_FALLBACK_CHAIN = 'groq,cerebras,gemini,mistral,github,openrouter';
+export const DEFAULT_FALLBACK_CHAIN = 'groq,cerebras,gemini,mistral,openrouter';
 export const ROUTE_MODES = ['auto', 'primary', 'openrouter'];
 // How long to wait for a provider to start responding before giving up on it.
 export const DEFAULT_PROVIDER_TIMEOUT_MS = 25_000;
@@ -43,11 +43,6 @@ export const OPENAI_COMPATIBLE_PROVIDERS = {
     key: env => env.MISTRAL_API_KEY, model: env => env.MISTRAL_MODEL || 'mistral-small-latest',
     enabled: env => Boolean(env.MISTRAL_API_KEY),
   },
-  github: {
-    label: 'GitHub Models', url: 'https://models.github.ai/inference/chat/completions',
-    key: env => env.GITHUB_MODELS_TOKEN, model: env => env.GITHUB_MODELS_MODEL || 'openai/gpt-4.1-mini',
-    enabled: env => Boolean(env.GITHUB_MODELS_TOKEN),
-  },
   openrouter: {
     label: 'OpenRouter Free', url: 'https://openrouter.ai/api/v1/chat/completions',
     key: env => env.OPENROUTER_API_KEY, model: () => OPENROUTER_FREE_MODEL,
@@ -65,7 +60,7 @@ export const OPENAI_COMPATIBLE_PROVIDERS = {
 };
 
 export const PROVIDERS = ['cloudflare', 'anthropic', ...Object.keys(OPENAI_COMPATIBLE_PROVIDERS)];
-const FALLBACK_PROVIDERS = new Set(['groq', 'cerebras', 'gemini', 'mistral', 'github', 'openrouter']);
+const FALLBACK_PROVIDERS = new Set(['groq', 'cerebras', 'gemini', 'mistral', 'openrouter']);
 
 export function isQuotaError(error) {
   const status = Number(error?.status || error?.statusCode || 0);

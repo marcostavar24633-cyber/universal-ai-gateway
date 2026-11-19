@@ -7,16 +7,30 @@ function json(data, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } });
 }
 
-function getProject(authHeader, env) {
+async function sha256(value) {
+  return new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)));
+}
+
+// Compares fixed-length digests so timing does not reveal how much of a token matched.
+function digestsEqual(a, b) {
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+  return diff === 0;
+}
+
+async function getProject(authHeader, env) {
   if (!authHeader?.startsWith('Bearer ')) return null;
   let keys;
   try { keys = JSON.parse(env.GATEWAY_PROJECT_KEYS || '{}'); } catch { return null; }
   const token = authHeader.slice(7).trim();
   if (!token || token.length > 256) return null;
+  const tokenDigest = await sha256(token);
+  let match = null;
   for (const [projectId, configuredToken] of Object.entries(keys)) {
-    if (typeof configuredToken === 'string' && configuredToken.length && configuredToken === token) return projectId;
+    if (typeof configuredToken !== 'string' || !configuredToken.length) continue;
+    if (digestsEqual(tokenDigest, await sha256(configuredToken)) && match === null) match = projectId;
   }
-  return null;
+  return match;
 }
 
 function validateMessages(messages) {
@@ -53,7 +67,7 @@ export default {
     const url = new URL(request.url);
     if (request.method === 'GET' && url.pathname === '/health') return json({ ok: true, service: 'universal-ai-gateway' });
     if (request.method !== 'POST' || url.pathname !== '/v1/chat/completions') return json({ error: 'Not found' }, 404);
-    const projectId = getProject(request.headers.get('Authorization'), env);
+    const projectId = await getProject(request.headers.get('Authorization'), env);
     if (!projectId) return json({ error: 'Unauthorized' }, 401);
 
     if (env.GATEWAY_RATE_LIMITER) {

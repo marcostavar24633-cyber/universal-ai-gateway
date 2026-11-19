@@ -134,3 +134,8 @@ test('Anthropic receives max_tokens but never temperature', async () => {
   assert.equal(sink.body.max_tokens, 64);
   assert.equal('temperature' in sink.body, false);
 });
+
+test('token that only shares a prefix with a project key is rejected', async () => {
+  const response = await worker.fetch(request({ messages: [{ role: 'user', content: 'hi' }] }, 'secret-a-extra'), envFor());
+  assert.equal(response.status, 401);
+});

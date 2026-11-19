@@ -1,4 +1,4 @@
-import { runGatewayChat } from './router.js';
+import { listModels, runGatewayChat } from './router.js';
 import { toOpenAISSE } from './stream.js';
 
 const MAX_BODY_BYTES = 32_000;
@@ -74,6 +74,10 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (request.method === 'GET' && url.pathname === '/health') return json({ ok: true, service: 'universal-ai-gateway' });
+    if (request.method === 'GET' && url.pathname === '/v1/models') {
+      if (!(await getProject(request.headers.get('Authorization'), env))) return apiError(401, 'Unauthorized', 'INVALID_PROJECT_TOKEN');
+      return json({ object: 'list', data: listModels(env) });
+    }
     if (request.method !== 'POST' || url.pathname !== '/v1/chat/completions') return apiError(404, 'Not found', 'NOT_FOUND');
     const projectId = await getProject(request.headers.get('Authorization'), env);
     if (!projectId) return apiError(401, 'Unauthorized', 'INVALID_PROJECT_TOKEN');

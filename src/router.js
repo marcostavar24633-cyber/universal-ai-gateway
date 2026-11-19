@@ -128,3 +128,14 @@ async function runAnthropic({ env, messages, generation, stream, fetchImpl }) {
     fallback: false,
   };
 }
+
+// Models a project can reach with the current configuration, in OpenAI list format.
+export function listModels(env) {
+  const directEnabled = env.AI_DIRECT_PROVIDERS_ENABLED === 'true' && env.AI_BILLING_MODE === 'api';
+  const entries = [];
+  if (env.AI) entries.push({ id: env.CF_AI_MODEL || DEFAULT_CF_MODEL, owned_by: 'cloudflare' });
+  if (env.OPENROUTER_ENABLED === 'true' && env.OPENROUTER_API_KEY) entries.push({ id: OPENROUTER_FREE_MODEL, owned_by: 'openrouter' });
+  if (directEnabled && env.OPENAI_API_KEY) entries.push({ id: env.OPENAI_MODEL || 'gpt-4.1-mini', owned_by: 'openai' });
+  if (directEnabled && env.ANTHROPIC_API_KEY) entries.push({ id: env.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL, owned_by: 'anthropic' });
+  return entries.map(entry => ({ ...entry, object: 'model', created: 0 }));
+}

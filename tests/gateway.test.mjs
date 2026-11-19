@@ -247,3 +247,20 @@ test('mid-stream upstream errors end the stream with an error event', async () =
   assert.equal(JSON.parse(payloads.at(-2)).error.code, 'STREAM_INTERRUPTED');
   assert.equal(payloads.at(-1), '[DONE]');
 });
+
+test('models endpoint requires a token and lists only configured routes', async () => {
+  const listRequest = token => new Request('https://gateway.test/v1/models', { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  assert.equal((await worker.fetch(listRequest(), envFor())).status, 401);
+  const response = await worker.fetch(listRequest('secret-a'), envFor());
+  assert.equal(response.status, 200);
+  const data = await response.json();
+  assert.equal(data.object, 'list');
+  assert.deepEqual(data.data.map(model => model.id), ['@cf/meta/llama-3.1-8b-instruct-fast']);
+  assert.equal(data.data[0].object, 'model');
+});
+
+test('unknown routes return an OpenAI-style 404 error', async () => {
+  const response = await worker.fetch(new Request('https://gateway.test/v1/embeddings', { method: 'POST' }), envFor());
+  assert.equal(response.status, 404);
+  assert.equal((await response.json()).error.code, 'NOT_FOUND');
+});

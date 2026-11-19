@@ -101,3 +101,74 @@ test('non-quota primary errors do not trigger fallback', async () => {
 test('paid direct providers remain disabled unless explicitly opted in', async () => {
   await assert.rejects(() => runGatewayChat({ env: { AI_BILLING_MODE: 'free', AI_DIRECT_PROVIDERS_ENABLED: 'false' }, provider: 'openai', messages: [{ role: 'user', content: 'hi' }] }), /disabled or not configured/);
 });
+
+const captureFetch = (responseBody, sink) => async (url, options) => {
+  sink.url = url;
+  sink.body = JSON.parse(options.body);
+  return new Response(JSON.stringify(responseBody), { status: 200, headers: { 'Content-Type': 'application/json' } });
+};
+
+test('generation options are forwarded to OpenRouter', async () => {
+  const sink = {};
+  const env = { OPENROUTER_ENABLED: 'true', OPENROUTER_API_KEY: 'test-key' };
+  await runGatewayChat({ env, routeMode: 'openrouter', messages: [{ role: 'user', content: 'hi' }], max_tokens: 99999, temperature: 5,
+    fetchImpl: captureFetch({ choices: [{ message: { content: 'ok' } }] }, sink) });
+  assert.equal(sink.body.max_tokens, 8192);
+  assert.equal(sink.body.temperature, 2);
+});
+
+test('generation options are forwarded to OpenAI when enabled', async () => {
+  const sink = {};
+  const env = { AI_BILLING_MODE: 'api', AI_DIRECT_PROVIDERS_ENABLED: 'true', OPENAI_API_KEY: 'test-key' };
+  await runGatewayChat({ env, provider: 'openai', routeMode: 'primary', messages: [{ role: 'user', content: 'hi' }], max_tokens: 50, temperature: 0.3,
+    fetchImpl: captureFetch({ choices: [{ message: { content: 'ok' } }] }, sink) });
+  assert.equal(sink.body.max_tokens, 50);
+  assert.equal(sink.body.temperature, 0.3);
+});
+
+test('Anthropic receives max_tokens but never temperature', async () => {
+  const sink = {};
+  const env = { AI_BILLING_MODE: 'api', AI_DIRECT_PROVIDERS_ENABLED: 'true', ANTHROPIC_API_KEY: 'test-key' };
+  await runGatewayChat({ env, provider: 'anthropic', routeMode: 'primary', messages: [{ role: 'user', content: 'hi' }], max_tokens: 64, temperature: 0.3,
+    fetchImpl: captureFetch({ content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' }, sink) });
+  assert.equal(sink.body.max_tokens, 64);
+  assert.equal('temperature' in sink.body, false);
+});
+
+test('token that only shares a prefix with a project key is rejected', async () => {
+  const response = await worker.fetch(request({ messages: [{ role: 'user', content: 'hi' }] }, 'secret-a-extra'), envFor());
+  assert.equal(response.status, 401);
+});
+
+test('completion includes provider usage and finish reason when available', async () => {
+  const ai = { run: async () => ({ response: 'cut', usage: { prompt_tokens: 7, completion_tokens: 3 } }) };
+  const response = await worker.fetch(request({ messages: [{ role: 'user', content: 'hi' }] }), envFor(ai));
+  const data = await response.json();
+  assert.deepEqual(data.usage, { prompt_tokens: 7, completion_tokens: 3, total_tokens: 10 });
+  assert.equal(data.choices[0].finish_reason, 'stop');
+});
+
+test('Anthropic stop reasons and usage map to OpenAI fields', async () => {
+  const env = { AI_BILLING_MODE: 'api', AI_DIRECT_PROVIDERS_ENABLED: 'true', ANTHROPIC_API_KEY: 'test-key' };
+  const result = await runGatewayChat({ env, provider: 'anthropic', routeMode: 'primary', messages: [{ role: 'user', content: 'hi' }],
+    fetchImpl: captureFetch({ content: [{ type: 'text', text: 'partial' }], stop_reason: 'max_tokens', usage: { input_tokens: 5, output_tokens: 9 } }, {}) });
+  assert.equal(result.finishReason, 'length');
+  assert.deepEqual(result.usage, { prompt_tokens: 5, completion_tokens: 9, total_tokens: 14 });
+});
+
+test('OpenRouter length finish reason is preserved', async () => {
+  const env = { OPENROUTER_ENABLED: 'true', OPENROUTER_API_KEY: 'test-key' };
+  const result = await runGatewayChat({ env, routeMode: 'openrouter', messages: [{ role: 'user', content: 'hi' }],
+    fetchImpl: captureFetch({ choices: [{ message: { content: 'x' }, finish_reason: 'length' }] }, {}) });
+  assert.equal(result.finishReason, 'length');
+  assert.equal(result.usage, undefined);
+});
+
+test('Anthropic defaults to the current Haiku model', async () => {
+  const sink = {};
+  const env = { AI_BILLING_MODE: 'api', AI_DIRECT_PROVIDERS_ENABLED: 'true', ANTHROPIC_API_KEY: 'test-key' };
+  const result = await runGatewayChat({ env, provider: 'anthropic', routeMode: 'primary', messages: [{ role: 'user', content: 'hi' }],
+    fetchImpl: captureFetch({ content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' }, sink) });
+  assert.equal(sink.body.model, 'claude-haiku-5-5');
+  assert.equal(result.model, 'claude-haiku-5-5');
+});

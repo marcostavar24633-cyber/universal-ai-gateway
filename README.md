@@ -4,7 +4,7 @@ Standalone Cloudflare Worker exposing one authenticated chat API for multiple pr
 
 ## Status
 
-Foundation only; not deployed. OpenRouter and direct OpenAI/Anthropic API providers are disabled by default. No secrets are included in this repository.
+Deployed to Cloudflare Workers through the manual `Deploy Universal AI Gateway` GitHub Actions workflow. OpenRouter and direct OpenAI/Anthropic API providers are disabled by default. No secrets are included in this repository.
 
 ## API
 
@@ -55,4 +55,4 @@ npm run deploy
 npx wrangler secret put GATEWAY_PROJECT_KEYS
 ```
 
-Only configure the OpenRouter key if intentionally enabling the free OpenRouter route. This repository change does not deploy the Worker or create secrets.
+Alternatively, run the `Deploy Universal AI Gateway` workflow manually from GitHub Actions; it requires the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repository secrets. Only configure the OpenRouter key if intentionally enabling the free OpenRouter route.

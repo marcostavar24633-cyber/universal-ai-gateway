@@ -21,7 +21,13 @@ Example request body:
 }
 ```
 
+Optional fields: `max_tokens`, `temperature` (forwarded to every provider except Anthropic, which only receives `max_tokens`), and `stream`.
+
 Pass a project-specific token in `Authorization: Bearer <project-token>`.
+
+### Streaming
+
+With `"stream": true` the gateway answers with `text/event-stream` in the OpenAI `chat.completion.chunk` format, ending with `data: [DONE]`. The last chunk carries `finish_reason` and, when the provider reports it, `usage`. Project, provider and fallback details are returned in the `X-Gateway-Project`, `X-Gateway-Provider`, `X-Gateway-Fallback` and `X-Gateway-Fallback-Reason` headers. Quota errors happen before the first byte, so `auto` fallback works the same as without streaming; if the upstream stream breaks midway, the gateway sends an error event with code `STREAM_INTERRUPTED` and then `[DONE]`.
 
 Set `GATEWAY_PROJECT_KEYS` as a Cloudflare Worker secret containing a JSON object mapping project IDs to long, unique random tokens. Never expose tokens or provider keys in browser code or commit them to Git.
 

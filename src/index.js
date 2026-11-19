@@ -1,4 +1,5 @@
 import { runGatewayChat } from './router.js';
+import { toOpenAISSE } from './stream.js';
 
 const MAX_BODY_BYTES = 32_000;
 const MAX_MESSAGES = 40;
@@ -92,10 +93,23 @@ export default {
     const routeMode = typeof body.routeMode === 'string' ? body.routeMode : 'auto';
     if (!['cloudflare', 'openai', 'anthropic'].includes(provider)) return json({ error: 'Unsupported provider' }, 400);
     if (!['auto', 'primary', 'openrouter'].includes(routeMode)) return json({ error: 'Unsupported route mode' }, 400);
+    if (body.stream !== undefined && typeof body.stream !== 'boolean') return json({ error: 'stream must be a boolean' }, 400);
     try {
-      const result = await runGatewayChat({ env, messages: body.messages, provider, routeMode, max_tokens: body.max_tokens, temperature: body.temperature });
+      const result = await runGatewayChat({ env, messages: body.messages, provider, routeMode, max_tokens: body.max_tokens, temperature: body.temperature, stream: body.stream === true });
       const id = `chatcmpl-${crypto.randomUUID()}`;
       const created = Math.floor(Date.now() / 1000);
+      if (result.events) {
+        return new Response(toOpenAISSE({ id, created, model: result.model, events: result.events }), {
+          headers: {
+            'Content-Type': 'text/event-stream; charset=utf-8',
+            'Cache-Control': 'no-store',
+            'X-Gateway-Project': projectId,
+            'X-Gateway-Provider': result.provider,
+            'X-Gateway-Fallback': String(result.fallback),
+            ...(result.fallbackReason ? { 'X-Gateway-Fallback-Reason': result.fallbackReason } : {}),
+          },
+        });
+      }
       return json({
         id,
         object: 'chat.completion',

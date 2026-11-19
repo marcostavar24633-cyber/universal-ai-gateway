@@ -13,6 +13,14 @@ export const OPENROUTER_FREE_MODEL = 'openrouter/free';
 export const DEFAULT_ANTHROPIC_MODEL = 'claude-haiku-5-5';
 // Workers AI applies this output limit when max_tokens is not sent.
 export const CF_DEFAULT_MAX_TOKENS = 256;
+// A request may pick any Workers AI model by its @cf/ id; other model names
+// (for example the "gpt-4o" OpenAI SDKs send by default) are ignored.
+const CF_MODEL_PATTERN = /^@cf\/[\w-][\w.-]*\/[\w-][\w.:-]*$/;
+
+export function cloudflareModel(env, requested) {
+  return typeof requested === 'string' && CF_MODEL_PATTERN.test(requested) ? requested : env.CF_AI_MODEL || DEFAULT_CF_MODEL;
+}
+
 export const DEFAULT_FALLBACK_CHAIN = 'groq,cerebras,gemini,mistral,openrouter';
 export const ROUTE_MODES = ['auto', 'primary', 'openrouter'];
 // How long to wait for a provider to start responding before giving up on it.
@@ -123,10 +131,10 @@ export function fallbackChain(env) {
 // { text?, finishReason?, usage? }) instead of `text`/`finishReason`/`usage`.
 // Upstream errors are raised before any event is produced, so fallback
 // behaves the same for streaming and non-streaming requests.
-export async function runGatewayChat({ env, messages, provider = 'cloudflare', routeMode = 'auto', max_tokens, temperature, stream = false, fetchImpl = fetch }) {
+export async function runGatewayChat({ env, messages, provider = 'cloudflare', routeMode = 'auto', max_tokens, temperature, model, stream = false, fetchImpl = fetch }) {
   const primary = PROVIDERS.includes(provider) ? provider : 'cloudflare';
   if (!ROUTE_MODES.includes(routeMode)) throw new Error('Unsupported route mode');
-  const request = { env, messages, generation: generationOptions({ max_tokens, temperature }), stream: stream === true, fetchImpl };
+  const request = { env, messages, generation: generationOptions({ max_tokens, temperature }), model, stream: stream === true, fetchImpl };
 
   if (routeMode === 'openrouter') return runProvider('openrouter', request);
 
@@ -166,9 +174,9 @@ function runProvider(name, request) {
   return runOpenAICompatible(name, config, request);
 }
 
-async function runCloudflare({ env, messages, generation, stream }) {
+async function runCloudflare({ env, messages, generation, model: requestedModel, stream }) {
   if (!env.AI) throw new Error('Cloudflare AI binding is not configured');
-  const model = env.CF_AI_MODEL || DEFAULT_CF_MODEL;
+  const model = cloudflareModel(env, requestedModel);
   const result = await env.AI.run(model, { messages, ...generation, ...(stream ? { stream: true } : {}) });
   const maxTokens = generation.max_tokens || CF_DEFAULT_MAX_TOKENS;
   if (stream) return { provider: 'cloudflare', model, events: cloudflareStreamEvents(result, maxTokens), fallback: false };

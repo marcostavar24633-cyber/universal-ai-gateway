@@ -1,5 +1,6 @@
 export const DEFAULT_CF_MODEL = '@cf/meta/llama-3.1-8b-instruct-fast';
 export const OPENROUTER_FREE_MODEL = 'openrouter/free';
+export const DEFAULT_ANTHROPIC_MODEL = 'claude-haiku-5-5';
 
 export function isQuotaError(error) {
   const status = Number(error?.status || error?.statusCode || 0);
@@ -101,11 +102,11 @@ async function runAnthropic({ env, messages, generation = {}, fetchImpl }) {
   const response = await fetchImpl('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: env.ANTHROPIC_MODEL || 'claude-3-5-haiku-latest', max_tokens: generation.max_tokens || 2048, ...(system ? { system } : {}), messages: input }),
+    body: JSON.stringify({ model: env.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL, max_tokens: generation.max_tokens || 2048, ...(system ? { system } : {}), messages: input }),
   });
   if (!response.ok) { const error = new Error(`Anthropic API request failed (${response.status})`); error.status = response.status; throw error; }
   const data = await response.json();
-  return { provider: 'anthropic', model: env.ANTHROPIC_MODEL || 'claude-3-5-haiku-latest', text: (data.content || []).filter(item => item.type === 'text').map(item => item.text).join('\n'),
+  return { provider: 'anthropic', model: env.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL, text: (data.content || []).filter(item => item.type === 'text').map(item => item.text).join('\n'),
     finishReason: ANTHROPIC_FINISH_REASONS[data.stop_reason] || 'stop',
     usage: openAIUsage({ prompt_tokens: data.usage?.input_tokens, completion_tokens: data.usage?.output_tokens }),
     fallback: false };

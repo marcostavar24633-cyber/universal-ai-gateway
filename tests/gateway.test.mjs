@@ -163,3 +163,12 @@ test('OpenRouter length finish reason is preserved', async () => {
   assert.equal(result.finishReason, 'length');
   assert.equal(result.usage, undefined);
 });
+
+test('Anthropic defaults to the current Haiku model', async () => {
+  const sink = {};
+  const env = { AI_BILLING_MODE: 'api', AI_DIRECT_PROVIDERS_ENABLED: 'true', ANTHROPIC_API_KEY: 'test-key' };
+  const result = await runGatewayChat({ env, provider: 'anthropic', routeMode: 'primary', messages: [{ role: 'user', content: 'hi' }],
+    fetchImpl: captureFetch({ content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' }, sink) });
+  assert.equal(sink.body.model, 'claude-haiku-5-5');
+  assert.equal(result.model, 'claude-haiku-5-5');
+});

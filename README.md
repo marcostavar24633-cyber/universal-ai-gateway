@@ -47,9 +47,24 @@ The Worker applies a Cloudflare Rate Limiting binding after project authenticati
 ## Routing
 
 - `primary`: call only the selected provider.
-- `auto`: call the selected provider; only detected quota/rate-limit errors trigger OpenRouter Free fallback.
+- `auto`: call the selected provider; only detected quota/rate-limit errors on it start the fallback chain.
 - `openrouter`: call only the fixed `openrouter/free` route.
-- Other provider failures do not silently switch routes.
+- Other failures of the selected provider do not silently switch routes.
+
+### Fallback chain
+
+`FALLBACK_CHAIN` (in `wrangler.toml`) lists free-tier providers to try in order once the primary provider is out of quota: by default `groq,cerebras,gemini,mistral,github,openrouter`. A provider without its key is skipped; a provider that is itself out of quota or unavailable hands over to the next one. If every provider in the chain fails, the gateway returns `PROVIDER_LIMIT` (429) or `PROVIDER_UNAVAILABLE` (503). Paid providers (`openai`, `anthropic`) are never used as fallbacks. The non-streaming response includes `fallbackAttempts`, the providers tried in order.
+
+| Provider | Secret to set | Optional model variable (default) |
+|---|---|---|
+| `groq` | `GROQ_API_KEY` | `GROQ_MODEL` (`llama-3.3-70b-versatile`) |
+| `cerebras` | `CEREBRAS_API_KEY` | `CEREBRAS_MODEL` (`llama-3.3-70b`) |
+| `gemini` | `GEMINI_API_KEY` | `GEMINI_MODEL` (`gemini-2.5-flash`) |
+| `mistral` | `MISTRAL_API_KEY` | `MISTRAL_MODEL` (`mistral-small-latest`) |
+| `github` | `GITHUB_MODELS_TOKEN` | `GITHUB_MODELS_MODEL` (`openai/gpt-4.1-mini`) |
+| `openrouter` | `OPENROUTER_API_KEY` plus `OPENROUTER_ENABLED=true` | fixed `openrouter/free` |
+
+Add a key with `npx wrangler secret put GROQ_API_KEY` (no redeploy needed). Free-tier models and limits change often; if a default model is retired, set the matching model variable. Any provider in the table can also be called directly with `"provider": "<name>", "routeMode": "primary"`.
 
 Cloudflare Workers AI is the default. OpenRouter requires both `OPENROUTER_ENABLED=true` and the `OPENROUTER_API_KEY` secret. Direct OpenAI/Anthropic API access requires `AI_BILLING_MODE=api`, `AI_DIRECT_PROVIDERS_ENABLED=true`, and the corresponding server-side secret. Those APIs can incur separate charges and are disabled by default.
 

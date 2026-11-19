@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import worker from '../src/index.js';
 import { runGatewayChat } from '../src/router.js';
 import { toOpenAISSE } from '../src/stream.js';
+import { ProjectQuota, dailyLimit, nextUtcMidnight } from '../src/quota.js';
 
 const envFor = (ai = { run: async () => ({ response: 'hello' }) }, limiter = async () => ({ success: true })) => ({
   GATEWAY_PROJECT_KEYS: JSON.stringify({ 'project-a': 'secret-a' }),
@@ -480,4 +481,66 @@ test('fallback providers get response_format but not chat_template_kwargs', asyn
     fetchImpl: captureFetch({ choices: [{ message: { content: '{}' } }] }, sink) });
   assert.deepEqual(sink.body.response_format, { type: 'json_object' });
   assert.equal('chat_template_kwargs' in sink.body, false);
+});
+
+// In-memory stand-in for the PROJECT_QUOTA Durable Object namespace.
+const quotaNamespace = () => {
+  const objects = new Map();
+  return {
+    idFromName: name => name,
+    get: id => {
+      if (!objects.has(id)) {
+        const store = new Map();
+        objects.set(id, new ProjectQuota({ storage: { get: async key => store.get(key), put: async (key, value) => { store.set(key, value); } } }));
+      }
+      const object = objects.get(id);
+      return { fetch: (url, init) => object.fetch(new Request(url, init)) };
+    },
+  };
+};
+
+test('the daily quota blocks a project after its limit and leaves other projects alone', async () => {
+  const env = { ...envFor(), GATEWAY_PROJECT_KEYS: JSON.stringify({ 'project-a': 'secret-a', 'project-b': 'secret-b' }),
+    PROJECT_QUOTA: quotaNamespace(), DAILY_REQUEST_LIMIT: '2' };
+  const ask = token => worker.fetch(request({ messages: [{ role: 'user', content: 'hi' }] }, token), env);
+  const first = await (await ask('secret-a')).json();
+  assert.deepEqual([first.quota.limit, first.quota.remaining], [2, 1]);
+  assert.equal((await ask('secret-a')).status, 200);
+  const blocked = await ask('secret-a');
+  assert.equal(blocked.status, 429);
+  assert.equal((await blocked.json()).error.code, 'DAILY_QUOTA_EXCEEDED');
+  assert.equal((await ask('secret-b')).status, 200);
+});
+
+test('invalid requests do not use up the daily quota', async () => {
+  const env = { ...envFor(), PROJECT_QUOTA: quotaNamespace(), DAILY_REQUEST_LIMIT: '1' };
+  assert.equal((await worker.fetch(request({ messages: [] }), env)).status, 400);
+  assert.equal((await worker.fetch(request({ messages: [{ role: 'user', content: 'hi' }] }), env)).status, 200);
+});
+
+test('the quota counter resets at the next UTC day', async () => {
+  const store = new Map();
+  const quota = new ProjectQuota({ storage: { get: async key => store.get(key), put: async (key, value) => { store.set(key, value); } } });
+  const check = async now => (await quota.fetch(new Request('https://q/', { method: 'POST', body: JSON.stringify({ limit: 1, now }) }))).json();
+  const evening = Date.UTC(2026, 10, 20, 23, 59);
+  assert.equal((await check(evening)).allowed, true);
+  assert.equal((await check(evening)).allowed, false);
+  assert.equal((await check(Date.UTC(2026, 10, 21, 0, 1))).allowed, true);
+  assert.equal(nextUtcMidnight(evening), Date.UTC(2026, 10, 21));
+});
+
+test('per-project limits override the global limit and 0 disables the quota', async () => {
+  const env = { DAILY_REQUEST_LIMIT: '50', PROJECT_DAILY_LIMITS: JSON.stringify({ studio: 500, internal: 0 }) };
+  assert.equal(dailyLimit(env, 'studio'), 500);
+  assert.equal(dailyLimit(env, 'internal'), 0);
+  assert.equal(dailyLimit(env, 'other'), 50);
+  assert.equal(dailyLimit({}, 'other'), 1000);
+  assert.equal(dailyLimit({ PROJECT_DAILY_LIMITS: '{broken' }, 'other'), 1000);
+});
+
+test('a failing quota store does not block requests', async () => {
+  const env = { ...envFor(), PROJECT_QUOTA: { idFromName: name => name, get: () => ({ fetch: async () => { throw new Error('storage down'); } }) } };
+  const response = await worker.fetch(request({ messages: [{ role: 'user', content: 'hi' }] }), env);
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).quota, undefined);
 });

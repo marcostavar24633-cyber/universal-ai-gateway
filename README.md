@@ -52,7 +52,9 @@ The script generates a random token, stores it with `wrangler secret put`, and c
 
 ## Request protection
 
-The Worker applies a Cloudflare Rate Limiting binding after project authentication: 30 requests per 60-second window per project key. Cloudflare documents these limits as approximate and location-scoped, not strict global budgets; bursts can exceed the threshold while counters synchronize. This is a basic abuse guard, not a guaranteed daily AI-usage quota. Request bodies are capped at 128 KB, 40 messages and 48,000 characters per message.
+The Worker applies a Cloudflare Rate Limiting binding after project authentication: 30 requests per 60-second window per project key. Cloudflare documents these limits as approximate and location-scoped, not strict global budgets; bursts can exceed the threshold while counters synchronize. This is a basic abuse guard, not a guaranteed daily AI-usage quota.
+
+**Daily quota.** Each project may also send a fixed number of valid chat requests per UTC day: `DAILY_REQUEST_LIMIT` (1000 by default), overridden per project by `PROJECT_DAILY_LIMITS` (e.g. `{"unique-design-studio":500}`, `0` disables it). Counters live in a Durable Object (`ProjectQuota`), so the limit is exact and global, and reset at 00:00 UTC together with the Workers AI free allocation. Invalid requests are not counted. Over the limit the gateway returns 429 `DAILY_QUOTA_EXCEEDED`; successful responses carry `quota` (`limit`, `remaining`, `resetAt`) or, for streams, the `X-Gateway-Quota-Remaining` header. If the quota store fails, requests are allowed and a `QUOTA_UNAVAILABLE` warning is logged. Request bodies are capped at 128 KB, 40 messages and 48,000 characters per message.
 
 ## Routing
 

@@ -1,5 +1,8 @@
 import { listModels, PROVIDERS, ROUTE_MODES, runGatewayChat } from './router.js';
 import { toOpenAISSE } from './stream.js';
+import { checkDailyQuota } from './quota.js';
+
+export { ProjectQuota } from './quota.js';
 
 const MAX_BODY_BYTES = 128_000;
 const MAX_MESSAGES = 40;
@@ -136,6 +139,19 @@ export default {
     if (!PROVIDERS.includes(provider)) return apiError(400, 'Unsupported provider', 'UNSUPPORTED_PROVIDER');
     if (!ROUTE_MODES.includes(routeMode)) return apiError(400, 'Unsupported route mode', 'UNSUPPORTED_ROUTE_MODE');
     if (body.stream !== undefined && typeof body.stream !== 'boolean') return apiError(400, 'stream must be a boolean', 'INVALID_STREAM_FLAG');
+
+    // Counted only for valid requests that are about to reach a provider.
+    let quota = null;
+    try {
+      quota = await checkDailyQuota(env, projectId);
+    } catch (error) {
+      logRequest({ project: projectId, warning: 'QUOTA_UNAVAILABLE', error: String(error?.message || error).slice(0, 200) });
+    }
+    if (quota && !quota.allowed) {
+      logRequest({ project: projectId, status: 429, code: 'DAILY_QUOTA_EXCEEDED', limit: quota.limit, ms: Date.now() - startedAt });
+      return apiError(429, `Daily request quota of ${quota.limit} exceeded; resets at ${new Date(quota.resetAt).toISOString()}`, 'DAILY_QUOTA_EXCEEDED');
+    }
+    const quotaInfo = quota ? { limit: quota.limit, remaining: quota.remaining, resetAt: new Date(quota.resetAt).toISOString() } : null;
     try {
       const result = await runGatewayChat({ env, messages: body.messages, provider, routeMode, max_tokens: body.max_tokens, temperature: body.temperature, model: body.model, response_format: body.response_format, chat_template_kwargs: body.chat_template_kwargs, stream: body.stream === true, projectId });
       const id = `chatcmpl-${crypto.randomUUID()}`;
@@ -157,6 +173,7 @@ export default {
             'X-Gateway-Fallback': String(result.fallback),
             ...(result.fallbackReason ? { 'X-Gateway-Fallback-Reason': result.fallbackReason } : {}),
             ...(result.fallbackAttempts ? { 'X-Gateway-Fallback-Attempts': result.fallbackAttempts.join(',') } : {}),
+            ...(quotaInfo ? { 'X-Gateway-Quota-Remaining': String(quotaInfo.remaining) } : {}),
           },
         });
       }
@@ -173,6 +190,7 @@ export default {
         fallback: result.fallback,
         ...(result.fallbackReason ? { fallbackReason: result.fallbackReason } : {}),
         ...(result.fallbackAttempts ? { fallbackAttempts: result.fallbackAttempts } : {}),
+        ...(quotaInfo ? { quota: quotaInfo } : {}),
       });
     } catch (error) {
       const status = Number(error?.status) === 429 ? 429 : 503;

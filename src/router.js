@@ -15,6 +15,8 @@ export const DEFAULT_ANTHROPIC_MODEL = 'claude-haiku-5-5';
 export const CF_DEFAULT_MAX_TOKENS = 256;
 export const DEFAULT_FALLBACK_CHAIN = 'groq,cerebras,gemini,mistral,github,openrouter';
 export const ROUTE_MODES = ['auto', 'primary', 'openrouter'];
+// How long to wait for a provider to start responding before giving up on it.
+export const DEFAULT_PROVIDER_TIMEOUT_MS = 25_000;
 
 const directProvidersEnabled = env => env.AI_DIRECT_PROVIDERS_ENABLED === 'true' && env.AI_BILLING_MODE === 'api';
 
@@ -90,6 +92,26 @@ export function generationOptions({ max_tokens, temperature } = {}) {
   return options;
 }
 
+// Aborts the request if response headers do not arrive in time. Once they do,
+// the timer is cleared so long streaming bodies are not cut off.
+async function fetchWithTimeout(fetchImpl, url, options, env, label) {
+  const timeoutMs = Number(env.PROVIDER_TIMEOUT_MS) > 0 ? Number(env.PROVIDER_TIMEOUT_MS) : DEFAULT_PROVIDER_TIMEOUT_MS;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetchImpl(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      const timeoutError = new Error(`${label} did not respond within ${timeoutMs} ms`);
+      timeoutError.status = 504;
+      throw timeoutError;
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function upstreamError(label, response) {
   const error = new Error(`${label} request failed (${response.status})`);
   error.status = response.status;
@@ -162,11 +184,11 @@ async function runCloudflare({ env, messages, generation, stream }) {
 async function runOpenAICompatible(name, config, { env, messages, generation, stream, fetchImpl }) {
   if (!config.enabled(env)) throw new Error(config.disabledMessage || `${config.label} is not enabled or configured`);
   const model = config.model(env);
-  const response = await fetchImpl(config.url, {
+  const response = await fetchWithTimeout(fetchImpl, config.url, {
     method: 'POST',
     headers: { Authorization: `Bearer ${config.key(env)}`, 'Content-Type': 'application/json', ...(config.headers || {}) },
     body: JSON.stringify({ model, messages, ...generation, ...(stream ? { stream: true, ...(config.streamOptions || {}) } : {}) }),
-  });
+  }, env, config.label);
   if (!response.ok) throw upstreamError(config.label, response);
   if (stream) return { provider: name, model, events: openAIStreamEvents(response.body), fallback: false };
   const data = await response.json();
@@ -180,11 +202,11 @@ async function runAnthropic({ env, messages, generation, stream, fetchImpl }) {
   const model = env.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL;
   const system = messages.filter(message => message.role === 'system').map(message => message.content).join('\n');
   const input = messages.filter(message => message.role !== 'system');
-  const response = await fetchImpl('https://api.anthropic.com/v1/messages', {
+  const response = await fetchWithTimeout(fetchImpl, 'https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
     body: JSON.stringify({ model, max_tokens: generation.max_tokens || 2048, ...(system ? { system } : {}), messages: input, ...(stream ? { stream: true } : {}) }),
-  });
+  }, env, 'Anthropic API');
   if (!response.ok) throw upstreamError('Anthropic API', response);
   if (stream) return { provider: 'anthropic', model, events: anthropicStreamEvents(response.body), fallback: false };
   const data = await response.json();

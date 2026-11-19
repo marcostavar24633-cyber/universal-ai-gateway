@@ -349,3 +349,21 @@ test('unknown provider names are rejected', async () => {
   const response = await worker.fetch(request({ provider: 'skynet', messages: [{ role: 'user', content: 'hi' }] }), envFor());
   assert.equal(response.status, 400);
 });
+
+test('a fallback provider that does not respond in time hands over to the next one', async () => {
+  const calls = [];
+  const env = { AI: quotaAI, FALLBACK_CHAIN: 'gemini,groq', GEMINI_API_KEY: 'm', GROQ_API_KEY: 'g', PROVIDER_TIMEOUT_MS: '50' };
+  const fetchImpl = (url, options) => {
+    const host = new URL(url).hostname;
+    calls.push(host);
+    if (host.includes('googleapis')) {
+      return new Promise((resolve, reject) => options.signal.addEventListener('abort', () => reject(new Error('aborted'))));
+    }
+    return Promise.resolve(new Response(JSON.stringify({ choices: [{ message: { content: 'fast' } }] }), { status: 200 }));
+  };
+  const started = Date.now();
+  const result = await runGatewayChat({ env, messages: [{ role: 'user', content: 'hi' }], fetchImpl });
+  assert.equal(result.provider, 'groq');
+  assert.deepEqual(calls, ['generativelanguage.googleapis.com', 'api.groq.com']);
+  assert.ok(Date.now() - started < 2000);
+});

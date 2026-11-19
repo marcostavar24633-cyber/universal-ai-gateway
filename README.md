@@ -64,6 +64,8 @@ The Worker applies a Cloudflare Rate Limiting binding after project authenticati
 | `github` | `GITHUB_MODELS_TOKEN` | `GITHUB_MODELS_MODEL` (`openai/gpt-4.1-mini`) |
 | `openrouter` | `OPENROUTER_API_KEY` plus `OPENROUTER_ENABLED=true` | fixed `openrouter/free` |
 
+Each provider gets 25 seconds to start responding (`PROVIDER_TIMEOUT_MS` overrides it); a provider that misses it counts as unavailable and the chain moves on.
+
 Add a key with `npx wrangler secret put GROQ_API_KEY` (no redeploy needed). Free-tier models and limits change often; if a default model is retired, set the matching model variable. Any provider in the table can also be called directly with `"provider": "<name>", "routeMode": "primary"`.
 
 Cloudflare Workers AI is the default. OpenRouter requires both `OPENROUTER_ENABLED=true` and the `OPENROUTER_API_KEY` secret. Direct OpenAI/Anthropic API access requires `AI_BILLING_MODE=api`, `AI_DIRECT_PROVIDERS_ENABLED=true`, and the corresponding server-side secret. Those APIs can incur separate charges and are disabled by default.

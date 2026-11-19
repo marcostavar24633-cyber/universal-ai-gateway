@@ -57,9 +57,9 @@ The Worker applies a Cloudflare Rate Limiting binding after project authenticati
 
 | Provider | Secret to set | Optional model variable (default) |
 |---|---|---|
-| `groq` | `GROQ_API_KEY` | `GROQ_MODEL` (`llama-3.3-70b-versatile`) |
+| `groq` | `GROQ_API_KEY` | `GROQ_MODEL` (`openai/gpt-oss-120b`) |
 | `cerebras` | `CEREBRAS_API_KEY` | `CEREBRAS_MODEL` (`llama-3.3-70b`) |
-| `gemini` | `GEMINI_API_KEY` | `GEMINI_MODEL` (`gemini-2.5-flash`) |
+| `gemini` | `GEMINI_API_KEY` | `GEMINI_MODEL` (`gemini-flash-latest`, an alias that follows the current Flash model) |
 | `mistral` | `MISTRAL_API_KEY` | `MISTRAL_MODEL` (`mistral-small-latest`) |
 | `github` | `GITHUB_MODELS_TOKEN` | `GITHUB_MODELS_MODEL` (`openai/gpt-4.1-mini`) |
 | `openrouter` | `OPENROUTER_API_KEY` plus `OPENROUTER_ENABLED=true` | fixed `openrouter/free` |

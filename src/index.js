@@ -19,6 +19,13 @@ function digestsEqual(a, b) {
   return diff === 0;
 }
 
+const ERROR_TYPES = { 400: 'invalid_request_error', 401: 'authentication_error', 404: 'not_found_error', 413: 'invalid_request_error', 429: 'rate_limit_error', 503: 'api_error' };
+
+// OpenAI-compatible error body, so official SDKs surface message and code.
+function apiError(status, message, code) {
+  return json({ error: { message, type: ERROR_TYPES[status] || 'api_error', code } }, status);
+}
+
 async function getProject(authHeader, env) {
   if (!authHeader?.startsWith('Bearer ')) return null;
   let keys;
@@ -67,33 +74,33 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (request.method === 'GET' && url.pathname === '/health') return json({ ok: true, service: 'universal-ai-gateway' });
-    if (request.method !== 'POST' || url.pathname !== '/v1/chat/completions') return json({ error: 'Not found' }, 404);
+    if (request.method !== 'POST' || url.pathname !== '/v1/chat/completions') return apiError(404, 'Not found', 'NOT_FOUND');
     const projectId = await getProject(request.headers.get('Authorization'), env);
-    if (!projectId) return json({ error: 'Unauthorized' }, 401);
+    if (!projectId) return apiError(401, 'Unauthorized', 'INVALID_PROJECT_TOKEN');
 
     if (env.GATEWAY_RATE_LIMITER) {
       try {
         const { success } = await env.GATEWAY_RATE_LIMITER.limit({ key: projectId });
-        if (!success) return json({ error: 'Project request rate limit exceeded', code: 'PROJECT_RATE_LIMIT' }, 429);
+        if (!success) return apiError(429, 'Project request rate limit exceeded', 'PROJECT_RATE_LIMIT');
       } catch {
-        return json({ error: 'Rate limit service unavailable' }, 503);
+        return apiError(503, 'Rate limit service unavailable', 'RATE_LIMITER_UNAVAILABLE');
       }
     }
 
     let body;
     try { body = await readJsonLimited(request); }
     catch (error) {
-      if (error?.status === 413) return json({ error: 'Request too large' }, 413);
-      return json({ error: 'Invalid JSON' }, 400);
+      if (error?.status === 413) return apiError(413, 'Request too large', 'REQUEST_TOO_LARGE');
+      return apiError(400, 'Invalid JSON', 'INVALID_JSON');
     }
     if (!body || typeof body !== 'object' || Array.isArray(body) || !validateMessages(body.messages)) {
-      return json({ error: 'Invalid messages payload' }, 400);
+      return apiError(400, 'Invalid messages payload', 'INVALID_MESSAGES');
     }
     const provider = typeof body.provider === 'string' ? body.provider : 'cloudflare';
     const routeMode = typeof body.routeMode === 'string' ? body.routeMode : 'auto';
-    if (!['cloudflare', 'openai', 'anthropic'].includes(provider)) return json({ error: 'Unsupported provider' }, 400);
-    if (!['auto', 'primary', 'openrouter'].includes(routeMode)) return json({ error: 'Unsupported route mode' }, 400);
-    if (body.stream !== undefined && typeof body.stream !== 'boolean') return json({ error: 'stream must be a boolean' }, 400);
+    if (!['cloudflare', 'openai', 'anthropic'].includes(provider)) return apiError(400, 'Unsupported provider', 'UNSUPPORTED_PROVIDER');
+    if (!['auto', 'primary', 'openrouter'].includes(routeMode)) return apiError(400, 'Unsupported route mode', 'UNSUPPORTED_ROUTE_MODE');
+    if (body.stream !== undefined && typeof body.stream !== 'boolean') return apiError(400, 'stream must be a boolean', 'INVALID_STREAM_FLAG');
     try {
       const result = await runGatewayChat({ env, messages: body.messages, provider, routeMode, max_tokens: body.max_tokens, temperature: body.temperature, stream: body.stream === true });
       const id = `chatcmpl-${crypto.randomUUID()}`;
@@ -125,7 +132,9 @@ export default {
       });
     } catch (error) {
       const status = Number(error?.status) === 429 ? 429 : 503;
-      return json({ error: status === 429 ? 'Provider quota or rate limit reached' : 'No configured AI route is currently available', code: status === 429 ? 'PROVIDER_LIMIT' : 'PROVIDER_UNAVAILABLE' }, status);
+      return status === 429
+        ? apiError(429, 'Provider quota or rate limit reached', 'PROVIDER_LIMIT')
+        : apiError(503, 'No configured AI route is currently available', 'PROVIDER_UNAVAILABLE');
     }
   },
 };

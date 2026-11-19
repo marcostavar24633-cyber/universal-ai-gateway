@@ -37,7 +37,7 @@ test('rate limit is keyed by authenticated project and returns 429 when exceeded
   const response = await worker.fetch(request({ messages: [{ role: 'user', content: 'hi' }] }), env);
   assert.equal(response.status, 429);
   assert.equal(key, 'project-a');
-  assert.equal((await response.json()).code, 'PROJECT_RATE_LIMIT');
+  assert.deepEqual((await response.json()).error, { message: 'Project request rate limit exceeded', type: 'rate_limit_error', code: 'PROJECT_RATE_LIMIT' });
 });
 
 test('rate limiter failures fail closed', async () => {

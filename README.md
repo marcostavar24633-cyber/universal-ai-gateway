@@ -63,7 +63,7 @@ The Worker applies a Cloudflare Rate Limiting binding after project authenticati
 
 ### Fallback chain
 
-`FALLBACK_CHAIN` (in `wrangler.toml`) lists free-tier providers to try in order once the primary provider is out of quota: by default `groq,cerebras,gemini,mistral,openrouter`. A provider without its key is skipped; a provider that is itself out of quota or unavailable hands over to the next one. If every provider in the chain fails, the gateway returns `PROVIDER_LIMIT` (429) or `PROVIDER_UNAVAILABLE` (503). Paid providers (`openai`, `anthropic`) are never used as fallbacks. The non-streaming response includes `fallbackAttempts`, the providers tried in order.
+`FALLBACK_CHAIN` (in `wrangler.toml`) lists free-tier providers to try in order once the primary provider is out of quota: by default `groq,cerebras,gemini,mistral,openrouter`. A provider without its key is skipped; a provider that is itself out of quota or unavailable hands over to the next one. If every provider in the chain fails, the gateway returns `PROVIDER_LIMIT` (429) or `PROVIDER_UNAVAILABLE` (503). Paid providers (`openai`, `anthropic`) are never used as fallbacks. `PROJECT_FALLBACK_CHAINS` (a JSON object in `wrangler.toml`, e.g. `{"unique-design-studio":"groq"}`) overrides the chain for individual projects; an empty string disables fallback for that project. The override is configured on the gateway, so clients cannot widen it. The non-streaming response includes `fallbackAttempts`, the providers tried in order.
 
 | Provider | Secret to set | Optional model variable (default) |
 |---|---|---|

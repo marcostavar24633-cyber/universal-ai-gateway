@@ -264,3 +264,22 @@ test('unknown routes return an OpenAI-style 404 error', async () => {
   assert.equal(response.status, 404);
   assert.equal((await response.json()).error.code, 'NOT_FOUND');
 });
+
+test('Workers AI replies that exhaust max_tokens report finish_reason length', async () => {
+  const ai = { run: async () => ({ response: 'cut', usage: { prompt_tokens: 5, completion_tokens: 30 } }) };
+  const response = await worker.fetch(request({ max_tokens: 30, messages: [{ role: 'user', content: 'hi' }] }), envFor(ai));
+  assert.equal((await response.json()).choices[0].finish_reason, 'length');
+});
+
+test('Workers AI default token budget is used when max_tokens is omitted', async () => {
+  const ai = { run: async () => ({ response: 'long', usage: { prompt_tokens: 5, completion_tokens: 256 } }) };
+  const response = await worker.fetch(request({ messages: [{ role: 'user', content: 'hi' }] }), envFor(ai));
+  assert.equal((await response.json()).choices[0].finish_reason, 'length');
+});
+
+test('streamed Workers AI replies that exhaust max_tokens end with length', async () => {
+  const ai = { run: async () => sseBody([{ response: 'a' }, { response: '', usage: { prompt_tokens: 1, completion_tokens: 10 } }, '[DONE]']) };
+  const response = await worker.fetch(request({ stream: true, max_tokens: 10, messages: [{ role: 'user', content: 'hi' }] }), envFor(ai));
+  const payloads = await readSSEPayloads(response);
+  assert.equal(JSON.parse(payloads.at(-2)).choices[0].finish_reason, 'length');
+});

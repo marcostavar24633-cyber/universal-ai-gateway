@@ -100,6 +100,22 @@ test('non-quota primary errors do not trigger fallback', async () => {
   await assert.rejects(() => runGatewayChat({ env, messages: [{ role: 'user', content: 'hi' }] }), /bad request/);
 });
 
+test('Workers AI daily free allocation (4006) triggers fallback', async () => {
+  const env = { AI: { run: async () => { throw new Error('4006: you have used up your daily free allocation of 10,000 neurons, please upgrade to the Workers Paid plan'); } }, OPENROUTER_ENABLED: 'true', OPENROUTER_API_KEY: 'test-key' };
+  const result = await runGatewayChat({ env, messages: [{ role: 'user', content: 'hi' }], fetchImpl: async () => new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), { status: 200, headers: { 'Content-Type': 'application/json' } }) });
+  assert.equal(result.provider, 'openrouter');
+  assert.equal(result.fallbackReason, 'primary_quota_exhausted');
+});
+
+test('an unavailable primary (5xx or internal error) hands over to the chain', async () => {
+  for (const make of [() => Object.assign(new Error('upstream failure'), { status: 503 }), () => new Error('3001: Unknown internal error')]) {
+    const env = { AI: { run: async () => { throw make(); } }, OPENROUTER_ENABLED: 'true', OPENROUTER_API_KEY: 'test-key' };
+    const result = await runGatewayChat({ env, messages: [{ role: 'user', content: 'hi' }], fetchImpl: async () => new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), { status: 200, headers: { 'Content-Type': 'application/json' } }) });
+    assert.equal(result.fallback, true);
+    assert.equal(result.fallbackReason, 'primary_unavailable');
+  }
+});
+
 test('paid direct providers remain disabled unless explicitly opted in', async () => {
   await assert.rejects(() => runGatewayChat({ env: { AI_BILLING_MODE: 'free', AI_DIRECT_PROVIDERS_ENABLED: 'false' }, provider: 'openai', messages: [{ role: 'user', content: 'hi' }] }), /disabled or not configured/);
 });

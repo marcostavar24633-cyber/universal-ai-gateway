@@ -7,9 +7,9 @@ AI_BILLING_MODE = "free"
 AI_DIRECT_PROVIDERS_ENABLED = "false"
 OPENROUTER_ENABLED = "true"
 FALLBACK_CHAIN = "groq,gemini,openrouter,cerebras,mistral"
-# Per-project chains override FALLBACK_CHAIN. Unique Design Studio serves real users,
-# so it falls back only to Groq, whose free tier allows production use.
-PROJECT_FALLBACK_CHAINS = '{"unique-design-studio":"groq"}'
+# Unique Design Studio tries every configured free-tier fallback in this order.
+# Providers without a corresponding secret are skipped automatically.
+PROJECT_FALLBACK_CHAINS = '{"unique-design-studio":"groq,cerebras,gemini,mistral,openrouter"}'
 CF_AI_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast"
 # Valid chat requests per project per UTC day; PROJECT_DAILY_LIMITS overrides it per project, 0 disables.
 DAILY_REQUEST_LIMIT = "1000"

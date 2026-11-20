@@ -2,6 +2,14 @@ name: Deploy Universal AI Gateway
 
 on:
   workflow_dispatch:
+  # Автодеплой: каждое слияние в main, меняющее код или конфиг Worker, выкатывается само.
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "wrangler.toml"
+      - "package.json"
+      - "package-lock.json"
 
 permissions:
   contents: read
@@ -44,3 +52,12 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx wrangler deploy
+
+      - name: Smoke test
+        # Проверка живого шлюза после выкладки: /health должен ответить 200.
+        run: |
+          for i in 1 2 3 4 5; do
+            if curl -fsS https://universal-ai-gateway.marcostavar24633.workers.dev/health; then exit 0; fi
+            sleep 5
+          done
+          echo "::error::Gateway /health failed after deploy"; exit 1

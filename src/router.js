@@ -73,7 +73,18 @@ const FALLBACK_PROVIDERS = new Set(['groq', 'cerebras', 'gemini', 'mistral', 'op
 export function isQuotaError(error) {
   const status = Number(error?.status || error?.statusCode || 0);
   const message = String(error?.message || error || '').toLowerCase();
-  return status === 429 || /quota|rate.?limit|resource.?exhausted|neurons.*limit|daily.*limit/.test(message);
+  // Workers AI сообщает об исчерпании бесплатных нейронов кодом 4006 ("daily free allocation") без HTTP-статуса.
+  return status === 429 || /(?:3036|3040|4006)|daily free allocation|quota|rate.?limit|resource.?exhausted|neurons.*limit|daily.*limit/.test(message);
+}
+
+// Основной провайдер недоступен (5xx, таймаут, сбой сети): запрос тоже уходит по цепочке.
+// Ошибки самого запроса (4xx, кроме 429) не переключаются — у резерва они повторятся.
+export function isUnavailableError(error) {
+  const status = Number(error?.status || error?.statusCode || 0);
+  if (status >= 500) return true;
+  if (status >= 400) return false;
+  const message = String(error?.message || error || '').toLowerCase();
+  return /(?:3001|3043|3046)|internal (?:server )?error|unavailable|overloaded|capacity|timed? ?out|did not respond|network|fetch failed/.test(message);
 }
 
 function normalizeTextResponse(result) {
@@ -176,14 +187,16 @@ export async function runGatewayChat({ env, messages, provider = 'cloudflare', r
   try {
     return await runProvider(primary, request);
   } catch (error) {
-    if (routeMode !== 'auto' || !isQuotaError(error)) throw error;
-    return runFallbackChain(primary, request);
+    if (routeMode !== 'auto') throw error;
+    const reason = isQuotaError(error) ? 'primary_quota_exhausted' : isUnavailableError(error) ? 'primary_unavailable' : null;
+    if (!reason) throw error;
+    return runFallbackChain(primary, request, reason);
   }
 }
 
 // Tries each configured fallback provider in order. Providers without keys are
 // skipped; a provider that is out of quota or unavailable hands over to the next.
-async function runFallbackChain(primary, request) {
+async function runFallbackChain(primary, request, reason = 'primary_quota_exhausted') {
   const candidates = fallbackChain(request.env, request.chainOverride).filter(name => name !== primary && OPENAI_COMPATIBLE_PROVIDERS[name].enabled(request.env));
   const attempted = [];
   let lastError;
@@ -191,7 +204,7 @@ async function runFallbackChain(primary, request) {
     attempted.push(name);
     try {
       const result = await runProvider(name, request);
-      return { ...result, fallback: true, fallbackReason: 'primary_quota_exhausted', fallbackAttempts: attempted };
+      return { ...result, fallback: true, fallbackReason: reason, fallbackAttempts: attempted };
     } catch (error) {
       lastError = error;
     }

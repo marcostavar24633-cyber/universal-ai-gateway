@@ -1,0 +1,40 @@
+name: Dependabot auto-merge
+# Minor and patch updates from Dependabot are squash-merged once CI passes on the PR.
+# Major updates (e.g. "from 4 to 7") are left for a human, because they can change behaviour.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  merge:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.actor.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge minor/patch update
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          PR=$(gh pr list --repo "$REPO" --head "$HEAD_BRANCH" --state open --json number,headRefOid,author \
+            --jq ".[] | select(.author.login == \"app/dependabot\" and .headRefOid == \"$HEAD_SHA\") | .number" | head -1)
+          if [ -z "$PR" ]; then echo "No open Dependabot PR for $HEAD_BRANCH at $HEAD_SHA"; exit 0; fi
+          TITLE=$(gh pr view "$PR" --repo "$REPO" --json title --jq .title)
+          FROM=$(echo "$TITLE" | sed -nE 's/.* from v?([0-9]+)[^ ]* to v?([0-9]+).*/\1/p')
+          TO=$(echo "$TITLE" | sed -nE 's/.* from v?([0-9]+)[^ ]* to v?([0-9]+).*/\2/p')
+          if [ -z "$FROM" ] || [ -z "$TO" ] || [ "$FROM" != "$TO" ]; then
+            echo "Major or unrecognised update ($TITLE): leaving PR #$PR for review."
+            exit 0
+          fi
+          gh pr merge "$PR" --repo "$REPO" --squash --delete-branch
+          echo "Merged #$PR: $TITLE"

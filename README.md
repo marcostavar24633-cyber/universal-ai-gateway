@@ -86,7 +86,7 @@ Cloudflare Workers AI is the default. OpenRouter requires both `OPENROUTER_ENABL
 
 Every chat request writes one JSON line (`"event":"gateway_request"`) with the project, requested and serving provider, model, fallback attempts, status or error code, token usage and duration. Message contents, project tokens and provider keys are never logged. Workers Logs is enabled in `wrangler.toml`, so the lines are searchable in the Cloudflare dashboard (Workers → universal-ai-gateway → Logs); `npx wrangler tail universal-ai-gateway` streams them live.
 
-Dependabot opens weekly pull requests for npm and GitHub Actions updates.
+Dependabot opens weekly pull requests for npm and GitHub Actions updates. Minor and patch updates are merged automatically once CI passes (`dependabot-automerge.yml`); major updates are left for review. Merged branches are deleted automatically.
 
 ## Local validation
 
